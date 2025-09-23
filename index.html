@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval';">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/public/kikao_logo.png" />
+
+    <!-- Meta description -->
+    <meta name="description" content="Kikao Unique Group is a friends' group dedicated to investment, supporting each other, and uplifting the community." />
+
+    <!-- Preload app logo -->
+    <link rel="preload" href="/kikao_logo.png" as="image">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kikao Unique Group</title>
+  </head>
+  <body>
+    <div style="display:flex;align-items:center;justify-content:center;padding:20px;">
+      <img src="/kikao_logo.png" alt="Kikao Logo" style="max-width:220px;height:auto;" />
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
