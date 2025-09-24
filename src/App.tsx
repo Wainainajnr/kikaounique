@@ -61,7 +61,14 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/expenses" element={<Expenses />} />
+          <Route
+            path="/expenses"
+            element={
+              <ProtectedRoute session={session}>
+                <Expenses />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/resources"
             element={
@@ -80,7 +87,7 @@ export default function App() {
           />
         </Route>
 
-        {/* 404 Not Found */}
+        {/* 404 */}
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
