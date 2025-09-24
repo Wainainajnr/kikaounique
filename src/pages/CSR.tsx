@@ -3,7 +3,7 @@ import { Dialog } from "@headlessui/react";
 import { toast } from "react-hot-toast";
 import { supabase } from "@/integrations/supabaseClient";
 
-// Updated interfaces to match actual database schema
+// Interfaces
 interface Project {
   id: string;
   title: string;
@@ -19,7 +19,7 @@ interface Project {
 
 interface Contribution {
   id: string;
-  project_id: string;
+  project_id: string | null;
   member_id: string | null;
   amount: number;
   contributed_on: string | null;
@@ -29,9 +29,10 @@ interface Contribution {
 interface CSRFormData {
   title: string;
   description: string;
+  start_date: string;
+  end_date: string;
   impact: string;
   amount: number;
-  date: string;
 }
 
 interface ContributionFormData {
@@ -41,16 +42,29 @@ interface ContributionFormData {
   date: string;
 }
 
-type ButtonVariant = 'primary' | 'outline' | 'secondary';
+type ButtonVariant = "primary" | "outline" | "secondary";
 
-const Button = ({ children, onClick, disabled = false, variant = 'primary', className = "", ...props }: { children: any; onClick?: () => void; disabled?: boolean; variant?: ButtonVariant; className?: string }) => {
+const Button = ({
+  children,
+  onClick,
+  disabled = false,
+  variant = "primary",
+  className = "",
+  ...props
+}: {
+  children: any;
+  onClick?: () => void;
+  disabled?: boolean;
+  variant?: ButtonVariant;
+  className?: string;
+}) => {
   const baseClasses = "px-4 py-2 rounded font-medium transition-colors";
   const variantClasses: Record<ButtonVariant, string> = {
     primary: "bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-400",
     outline: "border border-gray-300 hover:bg-gray-100 text-gray-700",
-    secondary: "bg-green-600 hover:bg-green-700 text-white"
+    secondary: "bg-green-600 hover:bg-green-700 text-white",
   };
-  
+
   return (
     <button
       className={`${baseClasses} ${variantClasses[variant]} ${className}`}
@@ -64,225 +78,98 @@ const Button = ({ children, onClick, disabled = false, variant = 'primary', clas
 };
 
 export default function CSR() {
+  // State
   const [projects, setProjects] = useState<Project[]>([]);
-  const [members, setMembers] = useState<{id: string, name: string}[]>([]);
+  const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [addContributionOpen, setAddContributionOpen] = useState(false);
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [adminSignInOpen, setAdminSignInOpen] = useState(false);
+
+  const [adminValidated, setAdminValidated] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem("isAdminValidated") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [adminPasswordInput, setAdminPasswordInput] = useState("");
+
   const [projectFormData, setProjectFormData] = useState<CSRFormData>({
     title: "",
     description: "",
     impact: "",
     amount: 0,
-    date: new Date().toISOString().split('T')[0]
+    start_date: new Date().toISOString().split("T")[0],
+    end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
   });
+
   const [contributionFormData, setContributionFormData] = useState<ContributionFormData>({
     project_id: "",
     member_id: "",
     amount: 0,
-    date: new Date().toISOString().split('T')[0]
+    date: new Date().toISOString().split("T")[0],
   });
-  
-  const [adminValidated, setAdminValidated] = useState<boolean>(() => {
-    try {
-      return sessionStorage.getItem('isAdminValidated') === 'true';
-    } catch (e) {
-      return false;
-    }
-  });
-  const [adminSignInOpen, setAdminSignInOpen] = useState(false);
-  const [adminPasswordInput, setAdminPasswordInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
 
-  // Fetch members list
+  const ADMIN_PASSWORD = "Admin@123";
+
+  // Fetch members
   useEffect(() => {
     fetchMembers();
   }, []);
 
   async function fetchMembers() {
-    const { data, error } = await supabase.from('members').select('id, name');
+    const { data, error } = await supabase.from("members").select("id, name");
     if (error) {
       console.error("Error fetching members:", error);
-      toast.error(error.message);
+      toast.error("Failed to load members");
     } else {
       setMembers(data || []);
     }
   }
 
-  const handleSupabaseError = (error: any, context: string) => {
-    console.error(`${context} error:`, error);
-    
-    // More specific error messages
-    if (error.code === 'PGRST301') {
-      toast.error('Table not found. Please check if the table exists.');
-    } else if (error.code === '42501') {
-      toast.error('Permission denied. Check RLS policies.');
-    } else if (error.message?.includes('column')) {
-      toast.error(`Column mismatch: ${error.message}`);
-    } else if (error.message?.includes('relation')) {
-      toast.error('Table does not exist. Please run the setup SQL.');
-    } else {
-      toast.error(`Failed to ${context}. Please try again.`);
-    }
-  };
-
-  const isValidDate = (dateString: string, allowFuture: boolean = true): boolean => {
-    if (!dateString) return false;
-    
-    const date = new Date(dateString);
-    const isValid = date instanceof Date && !isNaN(date.getTime());
-    
-    if (!allowFuture) {
-      return isValid && date <= new Date();
-    }
-    
-    return isValid;
-  };
-
-  const validateProjectForm = (): { isValid: boolean; errors: string[] } => {
-    const errors: string[] = [];
-
-    if (!projectFormData.title.trim()) {
-      errors.push("Project title is required");
-    }
-
-    if (!projectFormData.description.trim()) {
-      errors.push("Project description is required");
-    }
-
-    if (!isValidDate(projectFormData.date, true)) {
-      errors.push("Please select a valid date");
-    }
-
-    if (projectFormData.amount < 0) {
-      errors.push("Amount cannot be negative");
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
-  };
-
-  const validateContributionForm = (): { isValid: boolean; errors: string[] } => {
-    const errors: string[] = [];
-
-    if (!contributionFormData.project_id) {
-      errors.push("Please select a project");
-    }
-
-    if (!contributionFormData.member_id) {
-      errors.push("Please select a member");
-    }
-
-    if (!contributionFormData.amount || contributionFormData.amount <= 0) {
-      errors.push("Please enter a valid contribution amount");
-    }
-
-    if (!isValidDate(contributionFormData.date, false)) {
-      errors.push("Please select a valid contribution date (not in the future)");
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
-  };
-
-  // Debug function to check database structure
-  const checkDatabaseStructure = async () => {
-    try {
-      console.log("Checking database structure...");
-      
-      // Check if tables exist with simpler queries
-      const { data: projectsData, error: projectsError } = await supabase
-        .from("csr_projects")
-        .select("id, title, description, start_date, end_date")
-        .limit(1);
-
-      if (projectsError) {
-        console.error("csr_projects table error:", projectsError);
-      } else {
-        console.log("csr_projects table exists, sample data:", projectsData);
-      }
-
-      const { data: contributionsData, error: contributionsError } = await supabase
-        .from("csr_contributions")
-        .select("id, project_id, amount, contributed_on")
-        .limit(1);
-
-      if (contributionsError) {
-        console.error("csr_contributions table error:", contributionsError);
-      } else {
-        console.log("csr_contributions table exists, sample data:", contributionsData);
-      }
-    } catch (error) {
-      console.error("Error checking database structure:", error);
-    }
-  };
-
-  // Improved fetch function with better error handling
-  const fetchProjects = async () => {
+  // Fetch projects + contributions
+  const fetchAllProjects = async () => {
     setLoading(true);
     try {
-      // First, check database structure
-      await checkDatabaseStructure();
-
-      // Try a simpler query first - just get projects
-      console.log("Fetching projects...");
       const { data: projectsData, error: projectsError } = await supabase
         .from("csr_projects")
         .select("*")
         .order("created_at", { ascending: false });
 
       if (projectsError) {
-        console.error("Error fetching projects:", projectsError);
-        // If the simple query fails, the table might not exist or RLS is blocking
-        if (projectsError.code === 'PGRST301' || projectsError.message?.includes('relation')) {
-          toast.error('CSR projects table not found. Please check your database setup.');
-        }
-        setProjects([]);
-        return;
+        throw projectsError;
       }
 
-      console.log("Fetched projects data:", projectsData);
-
-      if (!projectsData || projectsData.length === 0) {
-        console.log("No projects found in database");
-        setProjects([]);
-        return;
-      }
-
-      // Now fetch contributions for each project separately
       const projectsWithContributions: Project[] = await Promise.all(
-        projectsData.map(async (project) => {
+        (projectsData || []).map(async (proj: any) => {
           const { data: contributionsData } = await supabase
             .from("csr_contributions")
             .select("*")
-            .eq("project_id", project.id);
+            .eq("project_id", proj.id)
+            .order("contributed_on", { ascending: false });
 
           return {
-            id: project.id,
-            title: project.title || "Untitled Project",
-            description: project.description,
-            start_date: project.start_date,
-            end_date: project.end_date,
-            // Use start_date as the display date, or fallback to created_at
-            date: project.start_date || project.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
-            created_at: project.created_at,
-            // For now, set default values for missing fields
-            status: "ongoing" as const,
-            amount: 0, // You'll need to add this column to your table
-            impact: project.description, // Use description as impact for now
-            csr_contributions: contributionsData || []
+            id: proj.id,
+            title: proj.title,
+            description: proj.description || null,
+            start_date: proj.start_date || null,
+            end_date: proj.end_date || null,
+            status: proj.status || "ongoing",
+            amount: proj.amount || 0,
+            impact: proj.impact || "",
+            created_at: proj.created_at,
+            csr_contributions: contributionsData || [],
           };
         })
       );
 
       setProjects(projectsWithContributions);
-      
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching projects:", error);
       toast.error("Failed to load projects");
       setProjects([]);
@@ -292,48 +179,93 @@ export default function CSR() {
   };
 
   useEffect(() => {
-    fetchProjects();
+    fetchAllProjects();
 
-    // Realtime subscriptions - simplified to avoid complex joins
-    const projectsChannel = supabase.channel("csr_projects_changes")
-      .on("postgres_changes", 
-        { event: "*", schema: "public", table: "csr_projects" }, 
-        (payload) => {
-          console.log("Project change detected:", payload);
-          // Refetch all projects
-          fetchProjects();
-        }
+    const projectSub = supabase
+      .channel("csr_projects_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "csr_projects" },
+        fetchAllProjects
       )
       .subscribe();
 
-    const contributionsChannel = supabase.channel("csr_contributions_changes")
-      .on("postgres_changes", 
-        { event: "*", schema: "public", table: "csr_contributions" }, 
-        (payload) => {
-          console.log("Contribution change detected:", payload);
-          // Refetch projects when contributions change
-          fetchProjects();
-        }
+    const contributionSub = supabase
+      .channel("csr_contributions_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "csr_contributions" },
+        fetchAllProjects
       )
       .subscribe();
 
     return () => {
-      try {
-        supabase.removeChannel(projectsChannel);
-        supabase.removeChannel(contributionsChannel);
-      } catch (e) {
-        console.warn("Error unsubscribing from channels:", e);
-      }
+      supabase.removeChannel(projectSub);
+      supabase.removeChannel(contributionSub);
     };
   }, []);
+
+  // Helpers
+  const isValidDate = (dateString: string, allowFuture: boolean = true) => {
+    if (!dateString) return false;
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return false;
+    if (!allowFuture && date > new Date()) return false;
+    return true;
+  };
+
+  const validateProjectForm = () => {
+    const errors: string[] = [];
+    if (!projectFormData.title.trim()) errors.push("Project title is required");
+    if (!projectFormData.description.trim()) errors.push("Project description is required");
+    if (!isValidDate(projectFormData.start_date, true)) errors.push("Please select a valid start date");
+    if (!isValidDate(projectFormData.end_date, true)) errors.push("Please select a valid end date");
+    
+    // Check if end date is after start date
+    if (projectFormData.start_date && projectFormData.end_date) {
+      const startDate = new Date(projectFormData.start_date);
+      const endDate = new Date(projectFormData.end_date);
+      if (endDate <= startDate) {
+        errors.push("End date must be after start date");
+      }
+    }
+    
+    if (projectFormData.amount <= 0) errors.push("Amount must be greater than 0");
+    return { isValid: errors.length === 0, errors };
+  };
+
+  const validateContributionForm = () => {
+    const errors: string[] = [];
+    if (!contributionFormData.project_id) errors.push("Select a project");
+    if (!contributionFormData.member_id) errors.push("Select a member");
+    if (contributionFormData.amount <= 0) errors.push("Amount must be greater than 0");
+    if (!isValidDate(contributionFormData.date, false)) errors.push("Contribution date cannot be in the future");
+    return { isValid: errors.length === 0, errors };
+  };
+
+  const handleSupabaseError = (error: any, context: string) => {
+    console.error(`Error in ${context}:`, error);
+    toast.error(`Failed to ${context}: ${error.message}`);
+  };
+
+  const handleAdminValidation = () => {
+    if (adminPasswordInput === ADMIN_PASSWORD) {
+      setAdminValidated(true);
+      sessionStorage.setItem("isAdminValidated", "true");
+      setAdminSignInOpen(false);
+      toast.success("Admin validated");
+    } else {
+      toast.error("Invalid admin password");
+    }
+    setAdminPasswordInput("");
+  };
 
   const handleAddProject = async () => {
     const validation = validateProjectForm();
     if (!validation.isValid) {
-      validation.errors.forEach(error => toast.error(error));
+      validation.errors.forEach((err) => toast.error(err));
       return;
     }
-
     if (!adminValidated) {
       setAdminSignInOpen(true);
       return;
@@ -341,104 +273,29 @@ export default function CSR() {
 
     setSubmitting(true);
     try {
-      console.log("Adding project:", projectFormData);
-      
-      const { data, error } = await supabase
-        .from("csr_projects")
-        .insert({
-          title: projectFormData.title.trim(),
-          description: projectFormData.description.trim(),
-          start_date: projectFormData.date, // Using start_date for the project date
-          // Store impact in description or add a new column for it
-          impact: projectFormData.impact.trim(), // You'll need to add this column
-          amount: projectFormData.amount, // You'll need to add this column
-          status: "ongoing" // You'll need to add this column
-        })
-        .select()
-        .single();
+      const { error } = await supabase.from("csr_projects").insert({
+        title: projectFormData.title.trim(),
+        description: projectFormData.description.trim(),
+        start_date: projectFormData.start_date,
+        end_date: projectFormData.end_date,
+        impact: projectFormData.impact.trim(),
+        amount: projectFormData.amount,
+        status: "ongoing",
+      });
 
-      if (error) {
-        console.error("Supabase insert error:", error);
-        
-        // If the error is about missing columns, try without them
-        if (error.message?.includes('column') && error.message?.includes('does not exist')) {
-          console.log('Missing columns detected, trying alternative insert...');
-          
-          // Insert without the missing columns
-          const { data: altData, error: altError } = await supabase
-            .from("csr_projects")
-            .insert({
-              title: projectFormData.title.trim(),
-              description: `${projectFormData.description.trim()}. Impact: ${projectFormData.impact.trim()}`,
-              start_date: projectFormData.date,
-            })
-            .select()
-            .single();
-            
-          if (altError) {
-            handleSupabaseError(altError, "add project");
-            return;
-          }
-          
-          console.log("Project added successfully (without impact/amount):", altData);
-          toast.success("Project added successfully!");
-          
-          if (altData) {
-            const newProject: Project = {
-              id: altData.id,
-              title: altData.title || "Untitled Project",
-              description: altData.description,
-              start_date: altData.start_date,
-              end_date: altData.end_date,
-              date: altData.start_date || altData.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
-              created_at: altData.created_at,
-              status: "ongoing",
-              amount: projectFormData.amount,
-              impact: projectFormData.impact,
-              csr_contributions: []
-            };
-            
-            setProjects(prev => [newProject, ...prev]);
-          }
-        } else {
-          handleSupabaseError(error, "add project");
-          return;
-        }
-      } else {
-        console.log("Project added successfully:", data);
-        toast.success("Project added successfully!");
-        
-        // Update local state immediately
-        if (data) {
-          const newProject: Project = {
-            id: data.id,
-            title: data.title || "Untitled Project",
-            description: data.description,
-            start_date: data.start_date,
-            end_date: data.end_date,
-            date: data.start_date || data.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
-            created_at: data.created_at,
-            status: data.status || "ongoing",
-            amount: projectFormData.amount,
-            impact: projectFormData.impact,
-            csr_contributions: []
-          };
-          
-          setProjects(prev => [newProject, ...prev]);
-        }
-      }
+      if (error) throw error;
 
+      toast.success("Project added successfully");
       setAddProjectOpen(false);
       setProjectFormData({
         title: "",
         description: "",
         impact: "",
         amount: 0,
-        date: new Date().toISOString().split('T')[0]
+        start_date: new Date().toISOString().split("T")[0],
+        end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
       });
-
-    } catch (error) {
-      console.error("Unexpected error adding project:", error);
+    } catch (error: any) {
       handleSupabaseError(error, "add project");
     } finally {
       setSubmitting(false);
@@ -448,10 +305,9 @@ export default function CSR() {
   const handleAddContribution = async () => {
     const validation = validateContributionForm();
     if (!validation.isValid) {
-      validation.errors.forEach(error => toast.error(error));
+      validation.errors.forEach((err) => toast.error(err));
       return;
     }
-
     if (!adminValidated) {
       setAdminSignInOpen(true);
       return;
@@ -459,463 +315,424 @@ export default function CSR() {
 
     setSubmitting(true);
     try {
-      console.log("Adding contribution:", contributionFormData);
-      
-      // Insert contribution with UUID member_id
-      const { data, error } = await supabase
-        .from("csr_contributions")
-        .insert([{
-          project_id: contributionFormData.project_id,
-          member_id: contributionFormData.member_id,
-          amount: Number(contributionFormData.amount),
-          contributed_on: new Date(contributionFormData.date)
-        }])
-        .select()
-        .single();
+      const { error } = await supabase.from("csr_contributions").insert({
+        project_id: contributionFormData.project_id,
+        member_id: contributionFormData.member_id,
+        amount: contributionFormData.amount,
+        contributed_on: contributionFormData.date,
+      });
 
-      if (error) {
-        console.error("Contribution insert error:", error);
-        handleSupabaseError(error, "add contribution");
-        return;
-      }
+      if (error) throw error;
 
-      console.log("Contribution added successfully:", data);
-      toast.success("Contribution added successfully!");
-      
-      // Update local state
-      setProjects(prev => prev.map(project => {
-        if (project.id === contributionFormData.project_id) {
-          const updatedContributions = [...(project.csr_contributions || []), data];
-          return {
-            ...project,
-            csr_contributions: updatedContributions
-          };
-        }
-        return project;
-      }));
-
+      toast.success("Contribution added successfully");
       setAddContributionOpen(false);
       setContributionFormData({
         project_id: "",
         member_id: "",
         amount: 0,
-        date: new Date().toISOString().split('T')[0]
+        date: new Date().toISOString().split("T")[0],
       });
-
-    } catch (error) {
-      console.error("Unexpected error adding contribution:", error);
+      setSelectedProject(null);
+    } catch (error: any) {
       handleSupabaseError(error, "add contribution");
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Helper function to get member name by ID
-  const getMemberName = (memberId: string | null) => {
-    if (!memberId) return "Anonymous";
-    const member = members.find(m => m.id === memberId);
-    return member ? member.name : "Unknown Member";
+  const getMemberName = (id: string | null) =>
+    members.find((m) => m.id === id)?.name || "Unknown Member";
+  
+  const formatDate = (d: string | null) =>
+    d
+      ? new Date(d).toLocaleDateString("en-US", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : "No date";
+  
+  const formatCurrency = (a: number | null | undefined) =>
+    new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(a || 0);
+  
+  const getTotalContributions = (p: Project) => {
+    if (!p.csr_contributions || p.csr_contributions.length === 0) return 0;
+    return p.csr_contributions.reduce((total, contribution) => total + (contribution.amount || 0), 0);
   };
 
-  const formatDate = (dateString: string) => {
-    if (!dateString) return "No date";
+  const getProgressPercentage = (project: Project) => {
+    const totalContributions = getTotalContributions(project);
+    const projectAmount = project.amount || 0;
     
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return "Invalid date";
-    
-    return date.toLocaleDateString('en-US', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric'
-    });
-  };
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-KE', {
-      style: 'currency',
-      currency: 'KES'
-    }).format(amount);
-  };
-
-  const getTotalContributions = (project: Project) => {
-    const contributions = project.csr_contributions || [];
-    return contributions.reduce((total: number, contribution: any) => total + (contribution.amount || 0), 0);
+    if (projectAmount <= 0) return 0;
+    return Math.min((totalContributions / projectAmount) * 100, 100);
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 p-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex justify-center items-center h-64">
-            <p>Loading projects...</p>
-          </div>
-        </div>
+      <div className="min-h-screen flex justify-center items-center">
+        <div className="text-lg">Loading projects...</div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">
-            Social Responsibility (CSR)
-          </h1>
-          <p className="text-gray-600 text-lg">
-            Our commitment to making a positive impact.
-          </p>
-        </div>
+      {/* Header */}
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold text-gray-800">CSR Projects</h1>
+        <Button onClick={() => setAddProjectOpen(true)}>Add Project</Button>
+      </div>
 
-        {/* Debug Info */}
-        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
-          <p className="text-sm text-yellow-800">
-            <strong>Debug:</strong> Found {projects.length} projects. 
-            {projects.length > 0 && ` Total contributions across all projects: ${projects.reduce((total, project) => total + getTotalContributions(project), 0)}`}
-            <br />
-            <strong>Members:</strong> {members.length} members loaded
-          </p>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex gap-4 mb-8 justify-center">
-          <Button onClick={() => setAddProjectOpen(true)}>
-            Add CSR Project
-          </Button>
-          <Button 
-            variant="secondary" 
-            onClick={() => setAddContributionOpen(true)}
-            disabled={projects.length === 0}
-          >
-            Add Member Contribution
+      {/* Projects List */}
+      {projects.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-gray-500 text-lg">No CSR projects yet.</p>
+          <Button onClick={() => setAddProjectOpen(true)} className="mt-4">
+            Create Your First Project
           </Button>
         </div>
-
-        {/* Projects Grid */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+      ) : (
+        <div className="space-y-6">
           {projects.map((project) => {
             const totalContributions = getTotalContributions(project);
-            const contributions = project.csr_contributions || [];
-            
+            const progress = getProgressPercentage(project);
+
             return (
-              <div key={project.id} className="bg-white rounded-lg shadow-md overflow-hidden border border-gray-200">
-                <div className="p-6">
-                  {/* Project Header */}
-                  <div className="flex justify-between items-start mb-4">
-                    <h3 className="text-xl font-semibold text-gray-800">
-                      {project.title}
-                    </h3>
-                    <span className={`px-3 py-1 text-sm rounded-full ${
-                      project.status === "ongoing" 
-                        ? "bg-green-100 text-green-800" 
-                        : "bg-gray-100 text-gray-800"
-                    }`}>
-                      {project.status}
-                    </span>
-                  </div>
-
-                  {/* Project Date */}
-                  <p className="text-gray-500 text-sm mb-4">
-                    {formatDate(project.date)}
-                  </p>
-
-                  {/* Project Description */}
-                  <p className="text-gray-600 mb-4 line-clamp-3">
-                    {project.description || "No description available"}
-                  </p>
-
-                  {/* Impact */}
-                  {project.impact && (
-                    <div className="mb-4">
-                      <h4 className="font-semibold text-gray-700 mb-1">Impact:</h4>
-                      <p className="text-gray-600 text-sm">{project.impact}</p>
-                    </div>
-                  )}
-
-                  {/* Budget and Contributions Summary */}
-                  <div className="mb-4 p-3 bg-gray-50 rounded">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-medium">Project Budget:</span>
-                      <span className="font-semibold">{formatCurrency(project.amount || 0)}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium">Total Contributions:</span>
-                      <span className="font-semibold text-green-600">{formatCurrency(totalContributions)}</span>
+              <div key={project.id} className="bg-white p-6 rounded-lg shadow-md border">
+                {/* Project Header */}
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-800">{project.title}</h3>
+                    <div className="flex items-center space-x-2 mt-1">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        project.status === "completed" 
+                          ? "bg-green-100 text-green-800" 
+                          : "bg-blue-100 text-blue-800"
+                      }`}>
+                        {project.status || "ongoing"}
+                      </span>
+                      <span className="text-sm text-gray-500">
+                        {formatDate(project.start_date)} - {formatDate(project.end_date)}
+                      </span>
                     </div>
                   </div>
+                </div>
 
-                  {/* Contributions List */}
-                  <div className="mb-4">
-                    <h4 className="font-semibold text-gray-700 mb-2">
-                      Contributions ({contributions.length}):
-                    </h4>
-                    {contributions.length > 0 ? (
-                      <ul className="space-y-2 max-h-32 overflow-auto">
-                        {contributions.map((contribution: any) => (
-                          <li key={contribution.id} className="flex justify-between items-center text-sm">
-                            <div className="text-gray-600">
-                              {getMemberName(contribution.member_id)}
-                              <span className="text-gray-400 ml-2">
-                                ({formatDate(contribution.contributed_on || contribution.date)})
-                              </span>
-                            </div>
-                            <div className="text-green-600 font-semibold">
-                              {formatCurrency(contribution.amount || 0)}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-gray-500 text-sm">No contributions yet.</p>
+                {/* Project Description */}
+                <p className="text-gray-600 mb-3">{project.description}</p>
+                
+                {/* Impact */}
+                {project.impact && (
+                  <p className="text-sm text-gray-700 mb-4">
+                    <span className="font-medium">Impact:</span> {project.impact}
+                  </p>
+                )}
+
+                {/* Budget and Contributions */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <p className="font-semibold text-gray-700">Budget: {formatCurrency(project.amount)}</p>
+                    <p className="font-semibold text-gray-700">
+                      Total Contributions: {formatCurrency(totalContributions)}
+                    </p>
+                    {project.amount && project.amount > 0 && (
+                      <p className="text-sm text-gray-600">
+                        Remaining: {formatCurrency(project.amount - totalContributions)}
+                      </p>
                     )}
                   </div>
+                </div>
 
-                  {/* Add Contribution Button */}
+                {/* Progress Bar */}
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm text-gray-600 mb-1">
+                    <span>Progress</span>
+                    <span>{progress.toFixed(1)}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div
+                      className="bg-green-500 h-3 rounded-full transition-all duration-300"
+                      style={{ width: `${progress}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Add Contribution Button */}
+                <div className="flex justify-between items-center">
                   <Button
-                    variant="outline"
-                    className="w-full"
+                    variant="secondary"
                     onClick={() => {
                       setSelectedProject(project);
-                      setContributionFormData(prev => ({
-                        ...prev,
-                        project_id: project.id
-                      }));
+                      setContributionFormData({
+                        ...contributionFormData,
+                        project_id: project.id,
+                      });
                       setAddContributionOpen(true);
                     }}
                   >
                     Add Contribution
                   </Button>
+                  
+                  {/* Progress Text */}
+                  <span className="text-sm text-gray-500">
+                    {formatCurrency(totalContributions)} of {formatCurrency(project.amount)} raised
+                  </span>
+                </div>
+
+                {/* Contributions List */}
+                <div className="mt-4 pt-4 border-t">
+                  <h4 className="font-medium text-gray-700 mb-2">Contributions:</h4>
+                  {project.csr_contributions && project.csr_contributions.length > 0 ? (
+                    <div className="space-y-2">
+                      {project.csr_contributions.map((contribution) => (
+                        <div key={contribution.id} className="flex justify-between items-center text-sm bg-gray-50 p-2 rounded">
+                          <span className="font-medium">
+                            {getMemberName(contribution.member_id)}
+                          </span>
+                          <div className="text-right">
+                            <span className="font-semibold">{formatCurrency(contribution.amount)}</span>
+                            <span className="text-gray-500 text-xs block">
+                              on {formatDate(contribution.contributed_on)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">No contributions yet.</p>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
+      )}
 
-        {projects.length === 0 && !loading && (
-          <div className="text-center py-12">
-            <p className="text-gray-500">No CSR projects found. Add your first project above.</p>
-          </div>
-        )}
-
-        {/* Add Project Dialog */}
-        <Dialog open={addProjectOpen} onClose={() => setAddProjectOpen(false)} className="relative z-50">
-          <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-          <div className="fixed inset-0 flex items-center justify-center p-4">
-            <Dialog.Panel className="bg-white rounded-xl p-6 max-w-md w-full space-y-4">
-              <Dialog.Title className="text-lg font-bold">
-                Add New CSR Project
-              </Dialog.Title>
-              
+      {/* Add Project Modal */}
+      <Dialog open={addProjectOpen} onClose={() => !submitting && setAddProjectOpen(false)}>
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center p-4">
+          <Dialog.Panel className="bg-white rounded-lg max-w-md w-full mx-auto p-6 shadow-xl">
+            <Dialog.Title className="text-lg font-bold mb-4">Add CSR Project</Dialog.Title>
+            
+            <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Project Name *
-                </label>
-                <input 
-                  className="w-full border p-2 rounded" 
-                  placeholder="Enter project name"
-                  value={projectFormData.title} 
-                  onChange={(e) => setProjectFormData({ ...projectFormData, title: e.target.value })} 
-                  required
+                <label className="block text-sm font-medium text-gray-700 mb-1">Project Title</label>
+                <input
+                  type="text"
+                  placeholder="Enter project title"
+                  value={projectFormData.title}
+                  onChange={(e) =>
+                    setProjectFormData({ ...projectFormData, title: e.target.value })
+                  }
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-              
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description *
-                </label>
-                <textarea 
-                  className="w-full border p-2 rounded" 
-                  placeholder="Describe the project briefly"
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  placeholder="Describe the project"
+                  value={projectFormData.description}
+                  onChange={(e) =>
+                    setProjectFormData({ ...projectFormData, description: e.target.value })
+                  }
                   rows={3}
-                  value={projectFormData.description} 
-                  onChange={(e) => setProjectFormData({ ...projectFormData, description: e.target.value })} 
-                  required
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Impact
-                </label>
-                <textarea 
-                  className="w-full border p-2 rounded" 
-                  placeholder="Describe the impact of the project"
-                  rows={2}
-                  value={projectFormData.impact} 
-                  onChange={(e) => setProjectFormData({ ...projectFormData, impact: e.target.value })} 
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Budget Amount (KES) *
-                </label>
-                <input 
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  className="w-full border p-2 rounded" 
-                  placeholder="Enter amount"
-                  value={projectFormData.amount || ""} 
-                  onChange={(e) => setProjectFormData({ ...projectFormData, amount: Number(e.target.value) })} 
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Project Date *
-                </label>
-                <input 
-                  type="date"
-                  className="w-full border p-2 rounded" 
-                  value={projectFormData.date} 
-                  onChange={(e) => setProjectFormData({ ...projectFormData, date: e.target.value })} 
-                />
-                {!isValidDate(projectFormData.date, true) && (
-                  <p className="text-red-500 text-xs mt-1">Please select a valid date</p>
-                )}
-              </div>
-              
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline" onClick={() => setAddProjectOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleAddProject} disabled={submitting}>
-                  {submitting ? "Adding..." : "Add Project"}
-                </Button>
-              </div>
-            </Dialog.Panel>
-          </div>
-        </Dialog>
 
-        {/* Add Contribution Dialog */}
-        <Dialog open={addContributionOpen} onClose={() => setAddContributionOpen(false)} className="relative z-50">
-          <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-          <div className="fixed inset-0 flex items-center justify-center p-4">
-            <Dialog.Panel className="bg-white rounded-xl p-6 max-w-md w-full space-y-4">
-              <Dialog.Title className="text-lg font-bold">
-                Add Member Contribution
-              </Dialog.Title>
-              
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Select Project *
-                </label>
-                <select 
-                  className="w-full border p-2 rounded" 
-                  value={contributionFormData.project_id} 
-                  onChange={(e) => setContributionFormData({ ...contributionFormData, project_id: e.target.value })}
-                  required
+                <label className="block text-sm font-medium text-gray-700 mb-1">Impact</label>
+                <input
+                  type="text"
+                  placeholder="Expected impact"
+                  value={projectFormData.impact}
+                  onChange={(e) =>
+                    setProjectFormData({ ...projectFormData, impact: e.target.value })
+                  }
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Budget Amount (KES)</label>
+                <input
+                  type="number"
+                  placeholder="0"
+                  value={projectFormData.amount}
+                  onChange={(e) =>
+                    setProjectFormData({ ...projectFormData, amount: Number(e.target.value) })
+                  }
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    value={projectFormData.start_date}
+                    onChange={(e) =>
+                      setProjectFormData({ ...projectFormData, start_date: e.target.value })
+                    }
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                  <input
+                    type="date"
+                    value={projectFormData.end_date}
+                    onChange={(e) =>
+                      setProjectFormData({ ...projectFormData, end_date: e.target.value })
+                    }
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button 
+                variant="outline" 
+                onClick={() => setAddProjectOpen(false)}
+                disabled={submitting}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleAddProject} disabled={submitting}>
+                {submitting ? "Saving..." : "Save Project"}
+              </Button>
+            </div>
+          </Dialog.Panel>
+        </div>
+      </Dialog>
+
+      {/* Add Contribution Modal */}
+      <Dialog open={addContributionOpen} onClose={() => !submitting && setAddContributionOpen(false)}>
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center p-4">
+          <Dialog.Panel className="bg-white rounded-lg max-w-md w-full mx-auto p-6 shadow-xl">
+            <Dialog.Title className="text-lg font-bold mb-4">
+              Add Contribution {selectedProject && `to ${selectedProject.title}`}
+            </Dialog.Title>
+            
+            <div className="space-y-4">
+              {!selectedProject && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Select Project</label>
+                  <select
+                    value={contributionFormData.project_id}
+                    onChange={(e) =>
+                      setContributionFormData({ ...contributionFormData, project_id: e.target.value })
+                    }
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Choose a project...</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Member</label>
+                <select
+                  value={contributionFormData.member_id}
+                  onChange={(e) =>
+                    setContributionFormData({ ...contributionFormData, member_id: e.target.value })
+                  }
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="">Select a project</option>
-                  {projects.map(project => (
-                    <option key={project.id} value={project.id}>
-                      {project.title}
+                  <option value="">Choose a member...</option>
+                  {members.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name}
                     </option>
                   ))}
                 </select>
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Select Member *
-                </label>
-                <select
-                  value={contributionFormData.member_id}
-                  onChange={e => setContributionFormData({ ...contributionFormData, member_id: e.target.value })}
-                  className="w-full border p-2 rounded"
-                  required
-                >
-                  <option value="">Select member</option>
-                  {members.map(m => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Amount (KES) *
-                </label>
-                <input 
-                  type="number"
-                  min="1"
-                  step="0.01"
-                  className="w-full border p-2 rounded" 
-                  placeholder="Enter contribution amount"
-                  value={contributionFormData.amount || ""} 
-                  onChange={(e) => setContributionFormData({ ...contributionFormData, amount: Number(e.target.value) })} 
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Contribution Date *
-                </label>
-                <input 
-                  type="date"
-                  max={new Date().toISOString().split('T')[0]}
-                  className="w-full border p-2 rounded" 
-                  value={contributionFormData.date} 
-                  onChange={(e) => setContributionFormData({ ...contributionFormData, date: e.target.value })} 
-                />
-                {!isValidDate(contributionFormData.date, false) && (
-                  <p className="text-red-500 text-xs mt-1">Please select a valid date (not in the future)</p>
-                )}
-              </div>
 
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline" onClick={() => setAddContributionOpen(false)}>
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={handleAddContribution} 
-                  disabled={submitting || !contributionFormData.project_id || !contributionFormData.member_id}
-                >
-                  {submitting ? "Adding..." : "Add Contribution"}
-                </Button>
-              </div>
-            </Dialog.Panel>
-          </div>
-        </Dialog>
-
-        {/* Admin Sign-in Dialog */}
-        <Dialog open={adminSignInOpen} onClose={() => setAdminSignInOpen(false)} className="relative z-50">
-          <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-          <div className="fixed inset-0 flex items-center justify-center p-4">
-            <Dialog.Panel className="bg-white rounded-xl p-6 max-w-md w-full space-y-4">
-              <Dialog.Title className="text-lg font-bold">Admin Sign-in</Dialog.Title>
-              <p className="text-sm text-gray-600">Enter admin password to continue.</p>
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Contribution Amount (KES)</label>
                 <input
-                  type="password"
-                  className="w-full border p-2 rounded"
-                  placeholder="Admin password"
-                  value={adminPasswordInput}
-                  onChange={(e) => setAdminPasswordInput(e.target.value)}
+                  type="number"
+                  placeholder="0"
+                  value={contributionFormData.amount}
+                  onChange={(e) =>
+                    setContributionFormData({
+                      ...contributionFormData,
+                      amount: Number(e.target.value),
+                    })
+                  }
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => { setAdminPasswordInput(''); setAdminSignInOpen(false); }}>Cancel</Button>
-                <Button onClick={() => {
-                  if (adminPasswordInput === 'Admin@123') {
-                    try { sessionStorage.setItem('isAdminValidated', 'true'); } catch (e) {}
-                    setAdminValidated(true);
-                    setAdminSignInOpen(false);
-                    setAdminPasswordInput('');
-                    toast.success('Admin validated for this session');
-                  } else {
-                    toast.error('Invalid admin password');
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Contribution Date</label>
+                <input
+                  type="date"
+                  value={contributionFormData.date}
+                  onChange={(e) =>
+                    setContributionFormData({ ...contributionFormData, date: e.target.value })
                   }
-                }}>
-                  Sign in
-                </Button>
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
-            </Dialog.Panel>
-          </div>
-        </Dialog>
-      </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setAddContributionOpen(false);
+                  setSelectedProject(null);
+                }}
+                disabled={submitting}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleAddContribution} disabled={submitting}>
+                {submitting ? "Saving..." : "Add Contribution"}
+              </Button>
+            </div>
+          </Dialog.Panel>
+        </div>
+      </Dialog>
+
+      {/* Admin Validation Modal */}
+      <Dialog open={adminSignInOpen} onClose={() => setAdminSignInOpen(false)}>
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center p-4">
+          <Dialog.Panel className="bg-white rounded-lg max-w-sm w-full mx-auto p-6 shadow-xl">
+            <Dialog.Title className="text-lg font-bold mb-4">Admin Validation Required</Dialog.Title>
+            
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">Please enter the admin password to continue.</p>
+              
+              <input
+                type="password"
+                placeholder="Enter admin password"
+                value={adminPasswordInput}
+                onChange={(e) => setAdminPasswordInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleAdminValidation()}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button variant="outline" onClick={() => setAdminSignInOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleAdminValidation}>Validate</Button>
+            </div>
+          </Dialog.Panel>
+        </div>
+      </Dialog>
     </div>
   );
 }

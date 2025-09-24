@@ -24,16 +24,9 @@ interface Member {
 interface MonthlyContribution {
   month: string;
   collected: number;
+  expenses: number;
+  net: number;
 }
-
-const MOCK_MONTHLY_DATA: MonthlyContribution[] = [
-  { month: "Jan", collected: 5000 },
-  { month: "Feb", collected: 7000 },
-  { month: "Mar", collected: 6000 },
-  { month: "Apr", collected: 8000 },
-  { month: "May", collected: 5500 },
-  { month: "Jun", collected: 7500 },
-];
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -43,9 +36,53 @@ export default function Dashboard() {
   const [yearFilter, setYearFilter] = useState<string | number>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [monthlyData, setMonthlyData] = useState<MonthlyContribution[]>(MOCK_MONTHLY_DATA);
+  const [monthlyData, setMonthlyData] = useState<MonthlyContribution[]>([]);
   const [totalExpenses, setTotalExpenses] = useState<number>(0);
   const [expensesData, setExpensesData] = useState<any[]>([]);
+
+  const calculateMonthlyData = (contributions: any[], expenses: any[], yearFilter: string | number) => {
+    // Initialize monthly data for all 12 months
+    const months = Array.from({ length: 12 }, (_, i) => ({
+      month: new Date(0, i).toLocaleString('default', { month: 'short' }),
+      collected: 0,
+      expenses: 0,
+      net: 0
+    }));
+
+    // Process contributions
+    contributions.forEach(c => {
+      if (yearFilter === 'all' || c.year === Number(yearFilter)) {
+        const idx = c.month - 1;
+        if (idx >= 0 && idx < 12) {
+          months[idx].collected += Number(c.amount || 0);
+        }
+      }
+    });
+
+    // Process expenses
+    expenses.forEach(e => {
+      if (!e.date) return;
+      
+      const expenseDate = new Date(e.date);
+      if (isNaN(expenseDate.getTime())) return;
+      
+      const expenseMonth = expenseDate.getMonth();
+      const expenseYear = expenseDate.getFullYear();
+      
+      if (yearFilter === 'all' || expenseYear === Number(yearFilter)) {
+        if (expenseMonth >= 0 && expenseMonth < 12) {
+          months[expenseMonth].expenses += Number(e.amount || 0);
+        }
+      }
+    });
+
+    // Calculate net amounts
+    months.forEach(month => {
+      month.net = Math.max(0, month.collected - month.expenses);
+    });
+
+    return months;
+  };
 
   const fetchData = async () => {
     try {
@@ -74,7 +111,6 @@ export default function Dashboard() {
       }
 
       if (membersData) {
-        // Map database columns (snake_case) to interface properties (camelCase)
         const membersWithDefaults = membersData.map((m: any) => ({
           id: m.id,
           name: m.name,
@@ -87,97 +123,75 @@ export default function Dashboard() {
         setMembers(membersWithDefaults);
       }
 
-      // Fetch contributions and map contribution_month -> month/year avoiding timezone drift
-      try {
-        const { data: contributionsData, error: contributionsError } = await supabase
-          .from('contributions')
-          .select('*, members(name, email, phone)');
+      // Fetch contributions
+      const { data: contributionsData, error: contributionsError } = await supabase
+        .from('contributions')
+        .select('*, members(name, email, phone)');
 
-        if (contributionsError) {
-          console.warn('Failed to fetch contributions', contributionsError);
-        } else if (contributionsData) {
-          // map contributions to normalized shape
-          const mapped = (contributionsData || []).map((d: any) => {
-            const monthRaw = d.contribution_month ?? d.paid_on ?? null;
-            let month = new Date().getMonth() + 1;
-            let year = new Date().getFullYear();
+      if (contributionsError) {
+        console.warn('Failed to fetch contributions', contributionsError);
+      } else {
+        const mappedContributions = (contributionsData || []).map((d: any) => {
+          const monthRaw = d.contribution_month ?? d.paid_on ?? null;
+          let month = new Date().getMonth() + 1;
+          let year = new Date().getFullYear();
 
-            if (monthRaw) {
-              if (typeof monthRaw === 'string' && /^\d{4}-\d{2}/.test(monthRaw)) {
-                const parts = monthRaw.split('-');
-                if (parts.length >= 2) {
-                  year = Number(parts[0]) || year;
-                  month = Number(parts[1]) || month;
-                }
-              } else {
-                const parsed = new Date(monthRaw as any);
-                if (!isNaN(parsed.getTime())) {
-                  month = parsed.getMonth() + 1;
-                  year = parsed.getFullYear();
-                }
+          if (monthRaw) {
+            if (typeof monthRaw === 'string' && /^\d{4}-\d{2}/.test(monthRaw)) {
+              const parts = monthRaw.split('-');
+              if (parts.length >= 2) {
+                year = Number(parts[0]) || year;
+                month = Number(parts[1]) || month;
               }
-            }
-
-            return {
-              id: d.id,
-              amount: d.amount || 0,
-              month,
-              year,
-              paid: !!d.paid_on,
-              member_id: d.member_id,
-              members: d.members ? { id: d.members.id || d.member_id, full_name: d.members.name ?? d.members.full_name ?? '' } : { id: d.member_id, full_name: '' },
-            };
-          });
-
-          setContributions(mapped);
-
-          // Fetch expenses and compute totals
-          try {
-            const { data: expData, error: expError } = await supabase.from('expenses').select('*');
-            if (expError) {
-              console.warn('Failed to fetch expenses', expError);
-              setExpensesData([]);
-              setTotalExpenses(0);
             } else {
-              const mappedExp = (expData || []).map((r: any) => ({
-                ...r,
-                amount: typeof r.amount === 'string' ? Number(r.amount) : r.amount,
-                date: r.date ? new Date(r.date).toISOString().split('T')[0] : r.date,
-              }));
-              setExpensesData(mappedExp);
-              const totalExp = mappedExp.reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
-              setTotalExpenses(totalExp);
-
-              // build monthly expenses map for yearFilter
-              const expMonthly = Array.from({ length: 12 }, () => 0);
-              for (const e of mappedExp) {
-                const d = e.date ? new Date(e.date) : null;
-                if (!d || isNaN(d.getTime())) continue;
-                const m = d.getMonth();
-                const y = d.getFullYear();
-                if (yearFilter === 'all' || y === Number(yearFilter)) {
-                  if (m >= 0 && m < 12) expMonthly[m] += Number(e.amount || 0);
-                }
+              const parsed = new Date(monthRaw as any);
+              if (!isNaN(parsed.getTime())) {
+                month = parsed.getMonth() + 1;
+                year = parsed.getFullYear();
               }
-
-              // compute monthly aggregation (contributions minus expenses)
-              const months = Array.from({ length: 12 }, (_, i) => ({ month: new Date(0, i).toLocaleString('default', { month: 'short' }), collected: 0 }));
-              for (const c of mapped) {
-                if (yearFilter === 'all' || c.year === Number(yearFilter)) {
-                  const idx = c.month - 1;
-                  if (idx >= 0 && idx < 12) months[idx].collected += Number(c.amount || 0);
-                }
-              }
-              // subtract expenses per month
-              for (let i = 0; i < 12; i++) months[i].collected = Math.max(0, months[i].collected - (expMonthly[i] || 0));
-              setMonthlyData(months);
             }
-          } catch (err) {
-            console.error('Error fetching expenses:', err);
           }
+
+          return {
+            id: d.id,
+            amount: d.amount || 0,
+            month,
+            year,
+            paid: !!d.paid_on,
+            member_id: d.member_id,
+            members: d.members ? { 
+              id: d.members.id || d.member_id, 
+              full_name: d.members.name ?? d.members.full_name ?? '' 
+            } : { id: d.member_id, full_name: '' },
+          };
+        });
+
+        setContributions(mappedContributions);
+
+        // Fetch expenses
+        const { data: expData, error: expError } = await supabase
+          .from('expenses')
+          .select('*');
+
+        if (expError) {
+          console.warn('Failed to fetch expenses', expError);
+          setExpensesData([]);
+          setTotalExpenses(0);
+        } else {
+          const mappedExpenses = (expData || []).map((r: any) => ({
+            ...r,
+            amount: typeof r.amount === 'string' ? Number(r.amount) : r.amount,
+            date: r.date ? new Date(r.date).toISOString().split('T')[0] : r.date,
+          }));
+
+          setExpensesData(mappedExpenses);
+          const totalExp = mappedExpenses.reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
+          setTotalExpenses(totalExp);
+
+          // Calculate monthly data
+          const monthlyCalculated = calculateMonthlyData(mappedContributions, mappedExpenses, yearFilter);
+          setMonthlyData(monthlyCalculated);
         }
-      } catch (err) {
-        console.error('Error fetching contributions:', err);
       }
 
     } catch (err) {
@@ -191,7 +205,6 @@ export default function Dashboard() {
   useEffect(() => {
     fetchData();
 
-    // subscribe to expenses changes so dashboard updates live
     const channel = supabase.channel('public:expenses');
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => {
       fetchData();
@@ -203,27 +216,16 @@ export default function Dashboard() {
     };
   }, []);
 
-  const totalContributions = members.filter((m) => m.contributionPaid).length * 2000;
-  const totalExpected = members.length * 2000;
-  const completionPercentage = totalExpected > 0 ? (totalContributions / totalExpected) * 100 : 0;
+  // Recalculate monthly data when year filter changes
+  useEffect(() => {
+    if (contributions.length > 0 || expensesData.length > 0) {
+      const monthlyCalculated = calculateMonthlyData(contributions, expensesData, yearFilter);
+      setMonthlyData(monthlyCalculated);
+    }
+  }, [yearFilter, contributions, expensesData]);
 
   const totalContributionsAmount = contributions.reduce((s, c) => s + Number(c.amount || 0), 0);
-  const netContributions = totalContributionsAmount - (totalExpenses || 0);
-
-  // Recompute monthly data and totals when contributions or yearFilter change
-  useEffect(() => {
-    const months = Array.from({ length: 12 }, (_, i) => ({ month: new Date(0, i).toLocaleString('default', { month: 'short' }), collected: 0 }));
-    let collectedTotal = 0;
-    for (const c of contributions) {
-      if (yearFilter === 'all' || c.year === Number(yearFilter)) {
-        const idx = c.month - 1;
-        if (idx >= 0 && idx < 12) months[idx].collected += Number(c.amount || 0);
-        collectedTotal += Number(c.amount || 0);
-      }
-    }
-    setMonthlyData(months);
-    // update completionPercentage related values via members for now (keep existing UI behavior)
-  }, [contributions, yearFilter]);
+  const netContributions = totalContributionsAmount - totalExpenses;
 
   return (
     <div className="min-h-screen bg-green-50 p-6 md:p-10">
@@ -233,9 +235,18 @@ export default function Dashboard() {
           <p className="text-sm text-gray-600">An overview of your group's financial health.</p>
         </div>
 
+        {/* Year Filter Selector - Add this */}
         <div className="flex items-center space-x-3">
+          <select 
+            value={yearFilter} 
+            onChange={(e) => setYearFilter(e.target.value)}
+            className="px-3 py-2 bg-white border rounded text-sm"
+          >
+            <option value="all">All Years</option>
+            <option value="2024">2024</option>
+            <option value="2023">2023</option>
+          </select>
           <button onClick={fetchData} className="px-3 py-2 bg-white border rounded text-sm">Refresh</button>
-          <button className="px-3 py-2 bg-white border rounded text-sm">Export CSV</button>
           <button className="px-3 py-2 bg-blue-600 text-white rounded text-sm">Download Statement</button>
         </div>
       </div>
@@ -244,58 +255,67 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-white p-4 rounded shadow">
           <div className="text-sm text-gray-500">Total Contributions</div>
-          <div className="mt-2 text-xl font-semibold">KES {contributions.reduce((s, c) => s + Number(c.amount || 0), 0).toLocaleString()}</div>
+          <div className="mt-2 text-xl font-semibold">KES {totalContributionsAmount.toLocaleString()}</div>
           <div className="text-xs text-gray-400">Total amount paid by members</div>
         </div>
 
         <div className="bg-white p-4 rounded shadow">
           <div className="text-sm text-gray-500">Total Expenses</div>
-          <div className="mt-2 text-xl font-semibold">KES {Number(totalExpenses || 0).toLocaleString()}</div>
+          <div className="mt-2 text-xl font-semibold">KES {totalExpenses.toLocaleString()}</div>
           <div className="text-xs text-gray-400">Total group expenditure</div>
         </div>
 
         <div className="bg-white p-4 rounded shadow">
           <div className="text-sm text-gray-500">Net Contributions</div>
-          <div className="mt-2 text-xl font-semibold">KES {Number(netContributions || 0).toLocaleString()}</div>
+          <div className="mt-2 text-xl font-semibold">KES {netContributions.toLocaleString()}</div>
           <div className="text-xs text-gray-400">Total contributions minus expenses</div>
         </div>
 
         <div className="bg-white p-4 rounded shadow">
           <div className="text-sm text-gray-500">Active Members</div>
-          <div className="mt-2 text-xl font-semibold">+{members.length}</div>
+          <div className="mt-2 text-xl font-semibold">{members.length}</div>
           <div className="text-xs text-gray-400">All registered group members</div>
-        </div>
-      </div>
-
-      {/* AI summary */}
-      <div className="bg-white p-4 rounded shadow mb-6">
-        <div className="flex items-start">
-          <div className="p-2 bg-blue-50 rounded mr-3">⚡</div>
-          <div>
-            <div className="text-sm font-semibold text-gray-700">AI-Powered Summary</div>
-            <p className="text-sm text-gray-600 mt-1">A quick analysis of the group's financial state.</p>
-            <p className="text-xs text-gray-500 mt-2">The chama is currently operating with no expenses or fines, indicating efficient financial management. A significant highlight is the complete absence of any expenses or fines incurred by the group.</p>
-          </div>
         </div>
       </div>
 
       {/* Main content: chart + member list */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-2 bg-white rounded shadow p-4">
-          <h3 className="text-lg font-semibold mb-4">Monthly Contributions</h3>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold">Monthly Contributions vs Expenses</h3>
+            <div className="text-sm text-gray-500">
+              {yearFilter === 'all' ? 'All Years' : `Year ${yearFilter}`}
+            </div>
+          </div>
           <div style={{ height: 320 }}>
             <ResponsiveContainer width="100%" height={320}>
               <BarChart data={monthlyData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="month" stroke="#6b7280" />
                 <YAxis stroke="#6b7280" />
-                <Tooltip formatter={(value) => [`KSh ${value.toLocaleString()}`, "Collected"]} />
-                <Bar dataKey="collected" fill="#16a34a" radius={[4, 4, 0, 0]} />
+                <Tooltip 
+                  formatter={(value, name) => {
+                    const formattedValue = `KSh ${Number(value).toLocaleString()}`;
+                    switch(name) {
+                      case 'collected': return [formattedValue, 'Contributions'];
+                      case 'expenses': return [formattedValue, 'Expenses'];
+                      case 'net': return [formattedValue, 'Net'];
+                      default: return [formattedValue, name];
+                    }
+                  }}
+                />
+                <Bar dataKey="collected" fill="#16a34a" radius={[4, 4, 0, 0]} name="Contributions" />
+                <Bar dataKey="expenses" fill="#dc2626" radius={[4, 4, 0, 0]} name="Expenses" />
+                <Bar dataKey="net" fill="#2563eb" radius={[4, 4, 0, 0]} name="Net" />
               </BarChart>
             </ResponsiveContainer>
           </div>
+          <div className="text-xs text-gray-500 mt-2 text-center">
+            Showing monthly breakdown of contributions, expenses, and net amounts
+          </div>
         </div>
 
+        {/* Rest of your component remains the same */}
         <div className="bg-white rounded shadow p-4">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold">Member Contributions</h3>
@@ -304,17 +324,19 @@ export default function Dashboard() {
 
           <div className="space-y-3">
             {members.slice(0, 10).map((m) => {
-              // determine status for current month
               const now = new Date();
               const currMonth = now.getMonth() + 1;
               const currYear = now.getFullYear();
               const contrib = contributions.find(c => c.member_id === m.id && c.month === currMonth && c.year === currYear);
               const status = contrib ? (contrib.paid ? 'Paid' : 'Pending') : 'Pending';
               const fines = contributions.filter(c => c.member_id === m.id && !c.paid).reduce((s, c) => s + 0, 0);
+              
               return (
                 <div key={m.id} className="flex items-center justify-between border-b pb-3">
                   <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-xs">{(m.name || '').split(' ').map(p=>p[0]).slice(0,2).join('')}</div>
+                    <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-xs">
+                      {(m.name || '').split(' ').map(p=>p[0]).slice(0,2).join('')}
+                    </div>
                     <div>
                       <div className="font-medium text-sm">{m.name}</div>
                       <div className="text-xs text-gray-500">{m.email || ''}</div>
