@@ -1,15 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabaseClient";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from "recharts";
 
 interface Member {
   id: string;
@@ -28,20 +19,40 @@ interface MonthlyContribution {
   net: number;
 }
 
+interface Contribution {
+  id: string;
+  amount: number;
+  month: number;
+  year: number;
+  paid: boolean;
+  member_id: string;
+  members: { id: string; full_name: string };
+}
+
+interface Expense {
+  id: string;
+  description: string;
+  amount: number;
+  date: string;
+  member_id?: string | null;
+  project_id?: string | null;
+  member_name?: string;
+  project_title?: string;
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [userName, setUserName] = useState<string>("Member");
   const [members, setMembers] = useState<Member[]>([]);
-  const [contributions, setContributions] = useState<any[]>([]);
+  const [contributions, setContributions] = useState<Contribution[]>([]);
+  const [expensesData, setExpensesData] = useState<Expense[]>([]);
   const [yearFilter, setYearFilter] = useState<string | number>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyContribution[]>([]);
   const [totalExpenses, setTotalExpenses] = useState<number>(0);
-  const [expensesData, setExpensesData] = useState<any[]>([]);
 
-  const calculateMonthlyData = (contributions: any[], expenses: any[], yearFilter: string | number) => {
-    // Initialize monthly data for all 12 months
+  const calculateMonthlyData = (contributions: Contribution[], expenses: Expense[], yearFilter: string | number) => {
     const months = Array.from({ length: 12 }, (_, i) => ({
       month: new Date(0, i).toLocaleString('default', { month: 'short' }),
       collected: 0,
@@ -49,7 +60,6 @@ export default function Dashboard() {
       net: 0
     }));
 
-    // Process contributions
     contributions.forEach(c => {
       if (yearFilter === 'all' || c.year === Number(yearFilter)) {
         const idx = c.month - 1;
@@ -59,7 +69,6 @@ export default function Dashboard() {
       }
     });
 
-    // Process expenses
     expenses.forEach(e => {
       if (!e.date) return;
       
@@ -76,7 +85,6 @@ export default function Dashboard() {
       }
     });
 
-    // Calculate net amounts
     months.forEach(month => {
       month.net = Math.max(0, month.collected - month.expenses);
     });
@@ -89,7 +97,6 @@ export default function Dashboard() {
       setError(null);
       setLoading(true);
 
-      // Get user session
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       if (sessionError) {
@@ -99,7 +106,6 @@ export default function Dashboard() {
       
       setUserName(session?.user?.email?.split("@")[0] || "Member");
 
-      // Get members from Supabase
       const { data: membersData, error: membersError } = await supabase
         .from("members")
         .select("*");
@@ -123,7 +129,6 @@ export default function Dashboard() {
         setMembers(membersWithDefaults);
       }
 
-      // Fetch contributions
       const { data: contributionsData, error: contributionsError } = await supabase
         .from('contributions')
         .select('*, members(name, email, phone)');
@@ -168,10 +173,9 @@ export default function Dashboard() {
 
         setContributions(mappedContributions);
 
-        // Fetch expenses
         const { data: expData, error: expError } = await supabase
           .from('expenses')
-          .select('*');
+          .select('*, members(name), csr_projects(title)');
 
         if (expError) {
           console.warn('Failed to fetch expenses', expError);
@@ -179,16 +183,20 @@ export default function Dashboard() {
           setTotalExpenses(0);
         } else {
           const mappedExpenses = (expData || []).map((r: any) => ({
-            ...r,
+            id: r.id,
+            description: r.description,
             amount: typeof r.amount === 'string' ? Number(r.amount) : r.amount,
             date: r.date ? new Date(r.date).toISOString().split('T')[0] : r.date,
+            member_id: r.member_id,
+            project_id: r.project_id,
+            member_name: r.members?.name || "N/A",
+            project_title: r.csr_projects?.title || "N/A",
           }));
 
           setExpensesData(mappedExpenses);
           const totalExp = mappedExpenses.reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
           setTotalExpenses(totalExp);
 
-          // Calculate monthly data
           const monthlyCalculated = calculateMonthlyData(mappedContributions, mappedExpenses, yearFilter);
           setMonthlyData(monthlyCalculated);
         }
@@ -216,7 +224,6 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Recalculate monthly data when year filter changes
   useEffect(() => {
     if (contributions.length > 0 || expensesData.length > 0) {
       const monthlyCalculated = calculateMonthlyData(contributions, expensesData, yearFilter);
@@ -227,6 +234,10 @@ export default function Dashboard() {
   const totalContributionsAmount = contributions.reduce((s, c) => s + Number(c.amount || 0), 0);
   const netContributions = totalContributionsAmount - totalExpenses;
 
+  const handleStatementClick = () => {
+    navigate('/statements');
+  };
+
   return (
     <div className="min-h-screen bg-green-50 p-6 md:p-10">
       <div className="flex justify-between items-center mb-6">
@@ -235,7 +246,6 @@ export default function Dashboard() {
           <p className="text-sm text-gray-600">An overview of your group's financial health.</p>
         </div>
 
-        {/* Year Filter Selector - Add this */}
         <div className="flex items-center space-x-3">
           <select 
             value={yearFilter} 
@@ -247,11 +257,15 @@ export default function Dashboard() {
             <option value="2023">2023</option>
           </select>
           <button onClick={fetchData} className="px-3 py-2 bg-white border rounded text-sm">Refresh</button>
-          <button className="px-3 py-2 bg-blue-600 text-white rounded text-sm">Download Statement</button>
+          <button 
+            onClick={handleStatementClick}
+            className="px-3 py-2 bg-blue-600 text-white rounded text-sm"
+          >
+            View Statement
+          </button>
         </div>
       </div>
 
-      {/* Top metrics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-white p-4 rounded shadow">
           <div className="text-sm text-gray-500">Total Contributions</div>
@@ -278,45 +292,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Main content: chart + member list */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2 bg-white rounded shadow p-4">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">Monthly Contributions vs Expenses</h3>
-            <div className="text-sm text-gray-500">
-              {yearFilter === 'all' ? 'All Years' : `Year ${yearFilter}`}
-            </div>
-          </div>
-          <div style={{ height: 320 }}>
-            <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={monthlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="month" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" />
-                <Tooltip 
-                  formatter={(value, name) => {
-                    const formattedValue = `KSh ${Number(value).toLocaleString()}`;
-                    switch(name) {
-                      case 'collected': return [formattedValue, 'Contributions'];
-                      case 'expenses': return [formattedValue, 'Expenses'];
-                      case 'net': return [formattedValue, 'Net'];
-                      default: return [formattedValue, name];
-                    }
-                  }}
-                />
-                <Bar dataKey="collected" fill="#16a34a" radius={[4, 4, 0, 0]} name="Contributions" />
-                <Bar dataKey="expenses" fill="#dc2626" radius={[4, 4, 0, 0]} name="Expenses" />
-                <Bar dataKey="net" fill="#2563eb" radius={[4, 4, 0, 0]} name="Net" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="text-xs text-gray-500 mt-2 text-center">
-            Showing monthly breakdown of contributions, expenses, and net amounts
-          </div>
-        </div>
-
-        {/* Rest of your component remains the same */}
-        <div className="bg-white rounded shadow p-4">
+        <div className="md:col-span-3 bg-white rounded shadow p-4">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold">Member Contributions</h3>
             <div className="text-sm text-gray-500">Status for {new Date().toLocaleString('default', { month: 'long' })}</div>
@@ -358,6 +335,9 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Placeholder for bottom navigation bar */}
+      {/* Add your bottom navigation bar component here, e.g., <BottomNav /> */}
     </div>
   );
 }

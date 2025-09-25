@@ -711,7 +711,7 @@ export default function Contributions() {
 
   if (loading) {
     return (
-      <div className="p-4">
+      <div className="min-h-screen bg-green-50 p-4">
         <h1 className="text-2xl font-bold">Member Contributions</h1>
         <div className="flex justify-center items-center h-64">
           <p>Loading contributions...</p>
@@ -721,7 +721,7 @@ export default function Contributions() {
   }
 
   return (
-    <div className="p-4 space-y-6">
+    <div className="min-h-screen bg-green-50 p-4 space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Member Contributions</h1>
         

@@ -1,4 +1,3 @@
-// src/pages/Expenses.tsx
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabaseClient";
 
@@ -9,8 +8,6 @@ interface Expense {
   date: string;
   member_id?: string | null;
   project_id?: string | null;
-  approved_by?: string | null;
-  status?: string | null;
   member_name?: string;
   project_title?: string;
 }
@@ -38,15 +35,14 @@ export default function Expenses() {
   const [date, setDate] = useState("");
   const [memberId, setMemberId] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
-  
+  const [password, setPassword] = useState<string>("");
+
   // Dropdown data
   const [members, setMembers] = useState<Member[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
   const [page, setPage] = useState<number>(1);
   const [limit, setLimit] = useState<number>(20);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
 
@@ -82,7 +78,7 @@ export default function Expenses() {
     try {
       const { data, error } = await supabase
         .from('expenses')
-        .select('id, description, amount, date, member_id, project_id, status, approved_by')
+        .select('id, description, amount, date, member_id, project_id')
         .limit(1);
 
       if (error) {
@@ -100,7 +96,7 @@ export default function Expenses() {
     }
   };
 
-  const fetchExpenses = async (opts?: { page?: number; limit?: number; status?: string; start?: string; end?: string }) => {
+  const fetchExpenses = async (opts?: { page?: number; limit?: number; start?: string; end?: string }) => {
     setLoading(true);
     setTableMissing(false);
     setFetchError(null);
@@ -115,11 +111,9 @@ export default function Expenses() {
         csr_projects (title)
       `);
 
-    const status = opts?.status ?? statusFilter;
     const start = opts?.start ?? startDate;
     const end = opts?.end ?? endDate;
 
-    if (status && status !== "all") query = query.eq("status", status);
     if (start) query = query.gte("date", start);
     if (end) query = query.lte("date", end);
 
@@ -143,8 +137,6 @@ export default function Expenses() {
         project_id: r.project_id,
         member_name: r.members?.name || "N/A",
         project_title: r.csr_projects?.title || "N/A",
-        approved_by: r.approved_by,
-        status: r.status,
       }));
       setExpenses(mapped);
     }
@@ -157,6 +149,11 @@ export default function Expenses() {
       return;
     }
 
+    if (password !== "Admin@123") {
+      alert("Invalid password. Please enter the correct admin password.");
+      return;
+    }
+
     await refreshSchemaCache();
 
     const expenseData = {
@@ -165,7 +162,6 @@ export default function Expenses() {
       date,
       member_id: memberId || null,
       project_id: projectId || null,
-      status: "Pending"
     };
 
     console.log("Submitting expense:", expenseData);
@@ -192,79 +188,10 @@ export default function Expenses() {
       setDate("");
       setMemberId("");
       setProjectId("");
+      setPassword("");
       setShowModal(false);
 
       await fetchExpenses({ page: 1 });
-    }
-  };
-
-  // FIXED: Update expense status function
-  const updateExpenseStatus = async (id: string, status: string) => {
-    if (!isAdmin) {
-      alert("Only admins can update expense status");
-      return;
-    }
-
-    try {
-      console.log(`Updating expense ${id} to status: ${status}`);
-      
-      const updateData = { 
-        status: status,
-        approved_by: status === "Approved" ? "Admin" : null
-      };
-
-      // First verify the expense exists
-      const { data: existingExpense, error: checkError } = await supabase
-        .from("expenses")
-        .select("id")
-        .eq("id", id)
-        .single();
-
-      if (checkError || !existingExpense) {
-        console.error("Expense not found:", id);
-        alert("Expense not found - it may have been deleted");
-        
-        // Refresh the list to remove the missing expense
-        setTimeout(() => {
-          fetchExpenses();
-        }, 500);
-        return;
-      }
-
-      // If expense exists, proceed with update
-      const { data, error } = await supabase
-        .from("expenses")
-        .update(updateData)
-        .eq("id", id)
-        .select()
-        .single();
-
-      if (error) {
-        console.error("Database error:", error);
-        alert("Failed to update expense: " + error.message);
-        return;
-      }
-
-      if (data) {
-        console.log("Update successful, returned data:", data);
-        alert(`Expense ${status.toLowerCase()} successfully!`);
-        
-        // Update local state immediately for better UX
-        setExpenses(prevExpenses => 
-          prevExpenses.map(expense => 
-            expense.id === id 
-              ? { 
-                  ...expense, 
-                  status: data.status,
-                  approved_by: data.approved_by
-                }
-              : expense
-          )
-        );
-      }
-    } catch (error) {
-      console.error("Unexpected error:", error);
-      alert("An unexpected error occurred");
     }
   };
 
@@ -273,14 +200,12 @@ export default function Expenses() {
       alert("No expenses to export");
       return;
     }
-    const headers = ["Date", "Description", "Member", "Project", "Approved By", "Status", "Amount"];
+    const headers = ["Date", "Description", "Member", "Project", "Amount"];
     const rows = expenses.map((e: any) => [
       e.date,
       e.description || "",
       e.member_name || "N/A",
       e.project_title || "N/A",
-      e.approved_by || "",
-      e.status || "",
       String(e.amount),
     ]);
     const csv = [headers.join(","), ...rows.map((r) => r.map((f) => `"${String(f).replace(/"/g, '""')}"`).join(","))].join("\r\n");
@@ -295,39 +220,10 @@ export default function Expenses() {
     URL.revokeObjectURL(url);
   };
 
-  const getStatusBadgeStyle = (status: string | null | undefined) => {
-    const statusText = status || "Pending";
-    switch (statusText) {
-      case "Approved":
-        return "bg-green-100 text-green-800 border-green-200";
-      case "Rejected":
-        return "bg-red-100 text-red-800 border-red-200";
-      case "Pending":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200";
-      default:
-        return "bg-gray-100 text-gray-800 border-gray-200";
-    }
-  };
-
-  const getRowStyle = (status: string | null | undefined) => {
-    const statusText = status || "Pending";
-    switch (statusText) {
-      case "Approved":
-        return "bg-green-50 hover:bg-green-100";
-      case "Rejected":
-        return "bg-red-50 hover:bg-red-100";
-      case "Pending":
-        return "bg-yellow-50 hover:bg-yellow-100";
-      default:
-        return "hover:bg-gray-50";
-    }
-  };
-
   const applyFilters = () => {
     setPage(1);
     fetchExpenses({ 
       page: 1, 
-      status: statusFilter, 
       start: startDate, 
       end: endDate 
     });
@@ -336,15 +232,12 @@ export default function Expenses() {
   const clearFilters = () => {
     setStartDate("");
     setEndDate("");
-    setStatusFilter("all");
     setPage(1);
-    fetchExpenses({ page: 1, status: "all" });
+    fetchExpenses({ page: 1 });
   };
 
   useEffect(() => {
     const initialize = async () => {
-      setIsAdmin(sessionStorage.getItem("adminValidated") === "1");
-      
       await refreshSchemaCache();
       await fetchDropdownData();
       
@@ -421,16 +314,6 @@ export default function Expenses() {
           <h3 className="font-semibold text-lg text-gray-800">Expense History</h3>
           {!tableMissing && (
             <div className="flex items-center space-x-2 flex-wrap gap-2">
-              <select
-                className="border border-gray-300 p-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="all">All Status</option>
-                <option value="Pending">Pending</option>
-                <option value="Approved">Approved</option>
-                <option value="Rejected">Rejected</option>
-              </select>
               <input 
                 type="date" 
                 className="border border-gray-300 p-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
@@ -483,8 +366,6 @@ create table if not exists expenses (
   date date not null,
   member_id uuid references members(id) on delete set null,
   project_id uuid references csr_projects(id) on delete set null,
-  approved_by text,
-  status text default 'Pending',
   created_at timestamptz default now()
 );`}
               </pre>
@@ -499,8 +380,6 @@ create table if not exists expenses (
   date date not null,
   member_id uuid references members(id) on delete set null,
   project_id uuid references csr_projects(id) on delete set null,
-  approved_by text,
-  status text default 'Pending',
   created_at timestamptz default now()
 );`)
                 }
@@ -541,49 +420,20 @@ create table if not exists expenses (
                     <th className="p-3 border border-gray-300 text-left font-semibold text-gray-700">Description</th>
                     <th className="p-3 border border-gray-300 text-left font-semibold text-gray-700">Member</th>
                     <th className="p-3 border border-gray-300 text-left font-semibold text-gray-700">Project</th>
-                    <th className="p-3 border border-gray-300 text-left font-semibold text-gray-700">Approved By</th>
-                    <th className="p-3 border border-gray-300 text-left font-semibold text-gray-700">Status</th>
                     <th className="p-3 border border-gray-300 text-left font-semibold text-gray-700">Amount</th>
-                    {isAdmin && <th className="p-3 border border-gray-300 text-left font-semibold text-gray-700">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {expenses.map((exp) => (
                     <tr 
                       key={exp.id} 
-                      className={`${getRowStyle(exp.status)} transition duration-200`}
+                      className="hover:bg-gray-50 transition duration-200"
                     >
                       <td className="p-3 border border-gray-300 font-medium">{exp.date}</td>
                       <td className="p-3 border border-gray-300">{exp.description}</td>
                       <td className="p-3 border border-gray-300">{exp.member_name || "N/A"}</td>
                       <td className="p-3 border border-gray-300">{exp.project_title || "N/A"}</td>
-                      <td className="p-3 border border-gray-300">{exp.approved_by || "N/A"}</td>
-                      <td className="p-3 border border-gray-300">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusBadgeStyle(exp.status)}`}>
-                          {exp.status || "Pending"}
-                        </span>
-                      </td>
                       <td className="p-3 border border-gray-300 font-semibold">KSh {exp.amount.toLocaleString()}</td>
-                      {isAdmin && (
-                        <td className="p-3 border border-gray-300">
-                          <div className="flex items-center space-x-2">
-                            <button 
-                              onClick={() => updateExpenseStatus(exp.id, "Approved")} 
-                              className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                              disabled={exp.status === "Approved"}
-                            >
-                              {exp.status === "Approved" ? "Approved" : "Approve"}
-                            </button>
-                            <button 
-                              onClick={() => updateExpenseStatus(exp.id, "Rejected")} 
-                              className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                              disabled={exp.status === "Rejected"}
-                            >
-                              {exp.status === "Rejected" ? "Rejected" : "Reject"}
-                            </button>
-                          </div>
-                        </td>
-                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -674,7 +524,7 @@ create table if not exists expenses (
 
               <label className="block text-sm mb-2 font-medium text-gray-700">Project (Optional)</label>
               <select
-                className="border border-gray-300 w-full p-2 rounded-lg mb-6 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="border border-gray-300 w-full p-2 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
               >
@@ -686,9 +536,20 @@ create table if not exists expenses (
                 ))}
               </select>
 
+              <label className="block text-sm mb-2 font-medium text-gray-700">Admin Password *</label>
+              <input
+                type="password"
+                className="border border-gray-300 w-full p-2 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+
               <div className="flex justify-end space-x-3">
                 <button 
-                  onClick={() => setShowModal(false)} 
+                  onClick={() => {
+                    setShowModal(false);
+                    setPassword("");
+                  }} 
                   className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition duration-200"
                 >
                   Cancel
@@ -704,6 +565,9 @@ create table if not exists expenses (
           </div>
         </div>
       )}
+
+      {/* Placeholder for bottom navigation bar */}
+      {/* Add your bottom navigation bar component here, e.g., <BottomNav /> */}
     </div>
   );
 }

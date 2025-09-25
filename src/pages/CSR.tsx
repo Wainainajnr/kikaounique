@@ -58,11 +58,11 @@ const Button = ({
   variant?: ButtonVariant;
   className?: string;
 }) => {
-  const baseClasses = "px-4 py-2 rounded font-medium transition-colors";
+  const baseClasses = "px-4 py-2 rounded-lg font-medium transition-all duration-200 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2";
   const variantClasses: Record<ButtonVariant, string> = {
-    primary: "bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-400",
-    outline: "border border-gray-300 hover:bg-gray-100 text-gray-700",
-    secondary: "bg-green-600 hover:bg-green-700 text-white",
+    primary: "bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-400 disabled:cursor-not-allowed focus:ring-blue-500",
+    outline: "border border-gray-300 hover:bg-gray-100 text-gray-700 disabled:bg-gray-200 disabled:text-gray-400 focus:ring-gray-300",
+    secondary: "bg-green-600 hover:bg-green-700 text-white disabled:bg-gray-400 disabled:cursor-not-allowed focus:ring-green-500",
   };
 
   return (
@@ -221,7 +221,6 @@ export default function CSR() {
     if (!isValidDate(projectFormData.start_date, true)) errors.push("Please select a valid start date");
     if (!isValidDate(projectFormData.end_date, true)) errors.push("Please select a valid end date");
     
-    // Check if end date is after start date
     if (projectFormData.start_date && projectFormData.end_date) {
       const startDate = new Date(projectFormData.start_date);
       const endDate = new Date(projectFormData.end_date);
@@ -370,46 +369,63 @@ export default function CSR() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex justify-center items-center">
-        <div className="text-lg">Loading projects...</div>
+      <div className="min-h-screen bg-green-50 flex justify-center items-center">
+        <div className="text-lg text-gray-700 font-medium animate-pulse">Loading CSR projects...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
+    <div className="min-h-screen bg-green-50 p-6 md:p-10 font-sans">
+      {/* CSR Message Banner */}
+      <div className="bg-gradient-to-r from-green-100 to-blue-100 p-6 rounded-lg shadow-md mb-8 text-center">
+        <h2 className="text-2xl font-bold text-gray-800">
+          Empowering Communities Through Impactful CSR Initiatives
+        </h2>
+        <p className="text-gray-600 mt-2">
+          We are committed to creating a sustainable future by supporting meaningful projects that uplift lives and foster positive change.
+        </p>
+      </div>
+
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">CSR Projects</h1>
-        <Button onClick={() => setAddProjectOpen(true)}>Add Project</Button>
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold text-blue-800">CSR Projects</h1>
+        <Button variant="primary" onClick={() => setAddProjectOpen(true)}>
+          Add New Project
+        </Button>
       </div>
 
       {/* Projects List */}
       {projects.length === 0 ? (
-        <div className="text-center py-8">
-          <p className="text-gray-500 text-lg">No CSR projects yet.</p>
-          <Button onClick={() => setAddProjectOpen(true)} className="mt-4">
+        <div className="text-center py-12 bg-white rounded-lg shadow-md">
+          <p className="text-gray-600 text-lg">No CSR projects yet.</p>
+          <Button variant="primary" onClick={() => setAddProjectOpen(true)} className="mt-4">
             Create Your First Project
           </Button>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => {
             const totalContributions = getTotalContributions(project);
             const progress = getProgressPercentage(project);
 
             return (
-              <div key={project.id} className="bg-white p-6 rounded-lg shadow-md border">
+              <div
+                key={project.id}
+                className="bg-white p-6 rounded-lg shadow-md border border-gray-200 hover:shadow-lg transition-shadow duration-300"
+              >
                 {/* Project Header */}
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <h3 className="text-xl font-bold text-gray-800">{project.title}</h3>
-                    <div className="flex items-center space-x-2 mt-1">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        project.status === "completed" 
-                          ? "bg-green-100 text-green-800" 
-                          : "bg-blue-100 text-blue-800"
-                      }`}>
+                    <h3 className="text-xl font-bold text-blue-800">{project.title}</h3>
+                    <div className="flex items-center space-x-2 mt-2">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-medium ${
+                          project.status === "completed"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-blue-100 text-blue-800"
+                        }`}
+                      >
                         {project.status || "ongoing"}
                       </span>
                       <span className="text-sm text-gray-500">
@@ -420,8 +436,8 @@ export default function CSR() {
                 </div>
 
                 {/* Project Description */}
-                <p className="text-gray-600 mb-3">{project.description}</p>
-                
+                <p className="text-gray-600 mb-4 line-clamp-3">{project.description}</p>
+
                 {/* Impact */}
                 {project.impact && (
                   <p className="text-sm text-gray-700 mb-4">
@@ -430,10 +446,10 @@ export default function CSR() {
                 )}
 
                 {/* Budget and Contributions */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 gap-2 mb-4">
                   <div>
-                    <p className="font-semibold text-gray-700">Budget: {formatCurrency(project.amount)}</p>
-                    <p className="font-semibold text-gray-700">
+                    <p className="text-sm font-semibold text-gray-700">Budget: {formatCurrency(project.amount)}</p>
+                    <p className="text-sm font-semibold text-gray-700">
                       Total Contributions: {formatCurrency(totalContributions)}
                     </p>
                     {project.amount && project.amount > 0 && (
@@ -446,13 +462,13 @@ export default function CSR() {
 
                 {/* Progress Bar */}
                 <div className="mb-4">
-                  <div className="flex justify-between text-sm text-gray-600 mb-1">
-                    <span>Progress</span>
+                  <div className="flex justify-between text-sm text-gray-600 mb-2">
+                    <span>Funding Progress</span>
                     <span>{progress.toFixed(1)}%</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-3">
+                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
                     <div
-                      className="bg-green-500 h-3 rounded-full transition-all duration-300"
+                      className="bg-gradient-to-r from-green-400 to-green-600 h-3 rounded-full transition-all duration-500 ease-in-out"
                       style={{ width: `${progress}%` }}
                     ></div>
                   </div>
@@ -473,25 +489,26 @@ export default function CSR() {
                   >
                     Add Contribution
                   </Button>
-                  
-                  {/* Progress Text */}
                   <span className="text-sm text-gray-500">
                     {formatCurrency(totalContributions)} of {formatCurrency(project.amount)} raised
                   </span>
                 </div>
 
                 {/* Contributions List */}
-                <div className="mt-4 pt-4 border-t">
+                <div className="mt-4 pt-4 border-t border-gray-200">
                   <h4 className="font-medium text-gray-700 mb-2">Contributions:</h4>
                   {project.csr_contributions && project.csr_contributions.length > 0 ? (
-                    <div className="space-y-2">
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
                       {project.csr_contributions.map((contribution) => (
-                        <div key={contribution.id} className="flex justify-between items-center text-sm bg-gray-50 p-2 rounded">
-                          <span className="font-medium">
+                        <div
+                          key={contribution.id}
+                          className="flex justify-between items-center text-sm bg-gray-50 p-3 rounded-md border border-gray-100"
+                        >
+                          <span className="font-medium text-gray-800">
                             {getMemberName(contribution.member_id)}
                           </span>
                           <div className="text-right">
-                            <span className="font-semibold">{formatCurrency(contribution.amount)}</span>
+                            <span className="font-semibold text-green-600">{formatCurrency(contribution.amount)}</span>
                             <span className="text-gray-500 text-xs block">
                               on {formatDate(contribution.contributed_on)}
                             </span>
@@ -511,13 +528,13 @@ export default function CSR() {
 
       {/* Add Project Modal */}
       <Dialog open={addProjectOpen} onClose={() => !submitting && setAddProjectOpen(false)}>
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center p-4">
-          <Dialog.Panel className="bg-white rounded-lg max-w-md w-full mx-auto p-6 shadow-xl">
-            <Dialog.Title className="text-lg font-bold mb-4">Add CSR Project</Dialog.Title>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <Dialog.Panel className="bg-white rounded-xl max-w-lg w-full mx-auto p-8 shadow-2xl transform transition-all duration-300">
+            <Dialog.Title className="text-2xl font-bold text-blue-800 mb-6">Add CSR Project</Dialog.Title>
             
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Project Title</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Project Title</label>
                 <input
                   type="text"
                   placeholder="Enter project title"
@@ -525,25 +542,25 @@ export default function CSR() {
                   onChange={(e) =>
                     setProjectFormData({ ...projectFormData, title: e.target.value })
                   }
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
                 <textarea
                   placeholder="Describe the project"
                   value={projectFormData.description}
                   onChange={(e) =>
                     setProjectFormData({ ...projectFormData, description: e.target.value })
                   }
-                  rows={3}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={4}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Impact</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Impact</label>
                 <input
                   type="text"
                   placeholder="Expected impact"
@@ -551,12 +568,12 @@ export default function CSR() {
                   onChange={(e) =>
                     setProjectFormData({ ...projectFormData, impact: e.target.value })
                   }
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Budget Amount (KES)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Budget Amount (KES)</label>
                 <input
                   type="number"
                   placeholder="0"
@@ -564,37 +581,37 @@ export default function CSR() {
                   onChange={(e) =>
                     setProjectFormData({ ...projectFormData, amount: Number(e.target.value) })
                   }
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
                   <input
                     type="date"
                     value={projectFormData.start_date}
                     onChange={(e) =>
                       setProjectFormData({ ...projectFormData, start_date: e.target.value })
                     }
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
                   <input
                     type="date"
                     value={projectFormData.end_date}
                     onChange={(e) =>
                       setProjectFormData({ ...projectFormData, end_date: e.target.value })
                     }
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="flex justify-end space-x-3 mt-6">
+            <div className="flex justify-end space-x-3 mt-8">
               <Button 
                 variant="outline" 
                 onClick={() => setAddProjectOpen(false)}
@@ -612,22 +629,22 @@ export default function CSR() {
 
       {/* Add Contribution Modal */}
       <Dialog open={addContributionOpen} onClose={() => !submitting && setAddContributionOpen(false)}>
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center p-4">
-          <Dialog.Panel className="bg-white rounded-lg max-w-md w-full mx-auto p-6 shadow-xl">
-            <Dialog.Title className="text-lg font-bold mb-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <Dialog.Panel className="bg-white rounded-xl max-w-lg w-full mx-auto p-8 shadow-2xl transform transition-all duration-300">
+            <Dialog.Title className="text-2xl font-bold text-blue-800 mb-6">
               Add Contribution {selectedProject && `to ${selectedProject.title}`}
             </Dialog.Title>
             
-            <div className="space-y-4">
+            <div className="space-y-6">
               {!selectedProject && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Select Project</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Project</label>
                   <select
                     value={contributionFormData.project_id}
                     onChange={(e) =>
                       setContributionFormData({ ...contributionFormData, project_id: e.target.value })
                     }
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Choose a project...</option>
                     {projects.map((project) => (
@@ -640,13 +657,13 @@ export default function CSR() {
               )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Select Member</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Select Member</label>
                 <select
                   value={contributionFormData.member_id}
                   onChange={(e) =>
                     setContributionFormData({ ...contributionFormData, member_id: e.target.value })
                   }
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="">Choose a member...</option>
                   {members.map((member) => (
@@ -658,7 +675,7 @@ export default function CSR() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Contribution Amount (KES)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Contribution Amount (KES)</label>
                 <input
                   type="number"
                   placeholder="0"
@@ -669,24 +686,24 @@ export default function CSR() {
                       amount: Number(e.target.value),
                     })
                   }
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Contribution Date</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Contribution Date</label>
                 <input
                   type="date"
                   value={contributionFormData.date}
                   onChange={(e) =>
                     setContributionFormData({ ...contributionFormData, date: e.target.value })
                   }
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
             </div>
 
-            <div className="flex justify-end space-x-3 mt-6">
+            <div className="flex justify-end space-x-3 mt-8">
               <Button 
                 variant="outline" 
                 onClick={() => {
@@ -707,11 +724,11 @@ export default function CSR() {
 
       {/* Admin Validation Modal */}
       <Dialog open={adminSignInOpen} onClose={() => setAdminSignInOpen(false)}>
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center p-4">
-          <Dialog.Panel className="bg-white rounded-lg max-w-sm w-full mx-auto p-6 shadow-xl">
-            <Dialog.Title className="text-lg font-bold mb-4">Admin Validation Required</Dialog.Title>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <Dialog.Panel className="bg-white rounded-xl max-w-sm w-full mx-auto p-8 shadow-2xl transform transition-all duration-300">
+            <Dialog.Title className="text-2xl font-bold text-blue-800 mb-6">Admin Validation Required</Dialog.Title>
             
-            <div className="space-y-4">
+            <div className="space-y-6">
               <p className="text-sm text-gray-600">Please enter the admin password to continue.</p>
               
               <input
@@ -720,11 +737,11 @@ export default function CSR() {
                 value={adminPasswordInput}
                 onChange={(e) => setAdminPasswordInput(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleAdminValidation()}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
 
-            <div className="flex justify-end space-x-3 mt-6">
+            <div className="flex justify-end space-x-3 mt-8">
               <Button variant="outline" onClick={() => setAdminSignInOpen(false)}>
                 Cancel
               </Button>
