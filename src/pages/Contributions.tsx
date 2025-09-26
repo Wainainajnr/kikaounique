@@ -42,18 +42,6 @@ interface NewContribution {
   project_id?: string | null;
 }
 
-interface SupabaseContribution {
-  id: string;
-  member_id: string | null;
-  amount: number;
-  contribution_month: string;
-  paid_on?: string | null;
-  type?: string | null;
-  project_id?: string | null;
-  members: { id: string; name: string; email?: string | null; phone: string; joined_at?: string | null } | null;
-  projects?: { id: string; name: string } | null;
-}
-
 export default function Contributions() {
   const [contributions, setContributions] = useState<Contribution[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -131,16 +119,25 @@ export default function Contributions() {
         return { contributions: [], members: [], projects: [] };
       }
 
+      // Fetch contributions with member data using join
       const { data: contributionsData, error: contributionsError } = await supabase
         .from("contributions")
-        .select("*, members(id, name, email, phone, joined_at), projects(id, name)")
-        .order("contribution_month", { ascending: false }) as { data: SupabaseContribution[] | null; error: any };
+        .select(`
+          *,
+          members (
+            name,
+            email,
+            phone,
+            joined_at
+          )
+        `)
+        .order("contribution_month", { ascending: false });
 
       if (contributionsError) {
         setError(handleSupabaseError(contributionsError, "fetch contributions"));
         setContributions([]);
       } else {
-        const mappedContributions = (contributionsData || []).map((d: SupabaseContribution) => {
+        const mappedContributions = (contributionsData || []).map((d: any) => {
           const monthRaw = d.contribution_month ?? d.paid_on ?? null;
           let month = new Date().getMonth() + 1;
           let year = new Date().getFullYear();
@@ -154,7 +151,7 @@ export default function Contributions() {
                   month = Number(parts[1]) || month;
                 }
               } else {
-                const parsed = new Date(monthRaw as any);
+                const parsed = new Date(monthRaw);
                 if (!isNaN(parsed.getTime())) {
                   month = parsed.getMonth() + 1;
                   year = parsed.getFullYear();
@@ -178,18 +175,18 @@ export default function Contributions() {
             month,
             year,
             paid: !!d.paid_on,
-            members: d.members ? { 
-              id: d.members.id || d.member_id || `unknown-${d.id}`, 
-              name: d.members.name ?? 'Unknown', 
-              email: d.members.email ?? null, 
-              phone: d.members.phone ?? '', 
-              joined_at: d.members.joined_at ?? null 
-            } : { id: d.member_id ?? `unknown-${d.id}`, name: 'Unknown', email: null, phone: '', joined_at: null },
+            members: {
+              id: d.member_id,
+              name: d.members?.name || 'Unknown',
+              email: d.members?.email || null,
+              phone: d.members?.phone || '',
+              joined_at: d.members?.joined_at || null
+            },
             amount: d.amount || 0,
             paid_on: d.paid_on,
-            type: d.type ?? null,
+            type: d.type || null,
             member_id: d.member_id,
-            project_id: d.project_id ?? null
+            project_id: d.project_id || null
           } as Contribution;
         });
 
@@ -197,6 +194,7 @@ export default function Contributions() {
         console.debug(`fetchData: loaded ${mappedContributions.length} contributions`);
       }
 
+      // Fetch members separately for the dropdown
       const { data: membersData, error: membersError } = await supabase
         .from("members")
         .select("*")
@@ -208,10 +206,10 @@ export default function Contributions() {
       } else {
         const mappedMembers = (membersData || []).map((m: any) => ({
           id: m.id,
-          name: m.name ?? '',
-          email: m.email ?? null,
-          phone: m.phone ?? '',
-          joined_at: m.joined_at ?? null
+          name: m.name || '',
+          email: m.email || null,
+          phone: m.phone || '',
+          joined_at: m.joined_at || null
         } as Member));
 
         const byId: Record<string, Member> = {};
@@ -221,6 +219,7 @@ export default function Contributions() {
         setMembers(Object.values(byId));
       }
 
+      // Fetch projects
       try {
         const { data: projectsData, error: projectsError } = await supabase
           .from("projects")
@@ -234,7 +233,7 @@ export default function Contributions() {
         } else {
           const mappedProjects = (projectsData || []).map((p: any) => ({
             id: p.id,
-            name: p.name ?? p.title ?? ''
+            name: p.name || p.title || ''
           } as Project));
           setProjects(mappedProjects);
         }
@@ -250,7 +249,7 @@ export default function Contributions() {
             setError(handleSupabaseError(csrError, "fetch csr_projects"));
             setProjects([]);
           } else {
-            const mapped = (csrData || []).map((p: any) => ({ id: p.id, name: p.title ?? p.name ?? '' } as Project));
+            const mapped = (csrData || []).map((p: any) => ({ id: p.id, name: p.title || p.name || '' } as Project));
             setProjects(mapped);
           }
         } catch (finalErr) {
@@ -369,35 +368,8 @@ export default function Contributions() {
         setContributions(prev => prev.filter(c => !tempIds.includes(c.id)));
         setError(handleSupabaseError(error, "add contribution(s)"));
       } else {
-        const server = await fetchData();
-        if (server && Array.isArray(server.contributions)) {
-          setContributions(server.contributions as Contribution[]);
-        }
-
-        try {
-          const memberId = newContribution.member_id;
-          const found = server?.contributions?.some((r: any) => months.some(m => r.member_id === memberId && r.year === m.year && r.month === m.month));
-          console.debug('addContribution: server contains added months?', found, 'member:', memberId, 'months:', months);
-
-          if (found) {
-            const visible = server.contributions.some((r: any) => {
-              const matchesName = (r.members?.name || '').toLowerCase().includes(search.toLowerCase());
-              const matchesStatus = statusFilter === 'all' || (statusFilter === 'paid' ? !!r.paid_on : !r.paid_on);
-              const matchesMonth = monthFilter === 'all' || r.month === Number(monthFilter);
-              const matchesYear = yearFilter === 'all' || r.year === Number(yearFilter);
-              return matchesName && matchesStatus && matchesMonth && matchesYear && r.member_id === memberId;
-            });
-            if (!visible) {
-              alert('Contributions were added but are currently hidden by your filters. Clear filters or adjust month/year to see them.');
-            }
-          } else {
-            console.warn('addContribution: server does not contain the newly added months yet.');
-          }
-        } catch (err) {
-          console.error('Diagnostic check failed:', err);
-        }
-
-        setNewContribution({ type: 'contribution', fromMonth: new Date().getMonth() + 1, fromYear: new Date().getFullYear(), toMonth: new Date().getMonth() + 1, toYear: new Date().getFullYear(), amount: 2000, member_id: '', project_id: null });
+        await fetchData();
+        setNewContribution({ type: 'contribution', fromMonth: new Date().getMonth() + 1, fromYear: new Date().getFullYear(), toMonth: new Date().getMonth() + 1, toYear: new Date().getFullYear(), amount: 2000, member_id: "", project_id: null });
       }
     } catch (err) {
       setContributions(prev => prev.filter(c => !tempIds.includes(c.id)));
@@ -441,10 +413,10 @@ export default function Contributions() {
       } else if (data) {
         setMembers(prev => prev.map(m => m.id === tempId ? { 
           id: data.id, 
-          name: data.name ?? '', 
-          email: data.email ?? null, 
-          phone: data.phone ?? '', 
-          joined_at: data.joined_at ?? null 
+          name: data.name || '', 
+          email: data.email || null, 
+          phone: data.phone || '', 
+          joined_at: data.joined_at || null 
         } : m));
         setNewMember({ name: '', email: '', phone: '' });
       }
@@ -499,10 +471,10 @@ export default function Contributions() {
           memberId = newMember.id;
           setMembers(prev => [...prev, { 
             id: newMember.id, 
-            name: newMember.name ?? '', 
-            email: newMember.email ?? null, 
-            phone: newMember.phone ?? '', 
-            joined_at: newMember.joined_at ?? null 
+            name: newMember.name || '', 
+            email: newMember.email || null, 
+            phone: newMember.phone || '', 
+            joined_at: newMember.joined_at || null 
           } as Member]);
         }
 
@@ -525,11 +497,7 @@ export default function Contributions() {
         if (error) {
           setError(handleSupabaseError(error, "bulk upload contributions"));
         } else {
-          console.log('Bulk upsert result:', upserted);
-          const server = await fetchData();
-          if (server && Array.isArray(server.contributions)) {
-            setContributions(server.contributions as Contribution[]);
-          }
+          await fetchData();
           alert(`Successfully added/updated ${Array.isArray(upserted) ? upserted.length : contributionsToAdd.length} contributions!`);
           setCsvData("");
           setShowBulkUpload(false);
@@ -553,7 +521,6 @@ export default function Contributions() {
   }), [contributions, search, statusFilter, monthFilter, yearFilter]);
 
   const pivotedContributions = useMemo(() => {
-    // Get unique month-year combinations
     const monthYears = Array.from(
       new Set(
         filtered.map(c => `${c.year}-${String(c.month).padStart(2, '0')}`)
@@ -667,8 +634,10 @@ export default function Contributions() {
             textColor: 255,
             fontStyle: 'bold'
           },
+          styles: {
+            cellWidth: 40
+          },
           columnStyles: {
-            0: { cellWidth: 40 },
             [headers.length - 1]: { cellWidth: 20 }
           }
         });
@@ -741,7 +710,7 @@ export default function Contributions() {
               />
               <button 
                 className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
-                onClick={authenticate}
+                onClick={() => authenticate()}
                 disabled={!password}
               >
                 Login
@@ -821,7 +790,7 @@ export default function Contributions() {
         <select 
           className="border p-2 rounded" 
           value={yearFilter} 
-          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+          onChange={(e) => {
             const v = e.target.value;
             setYearFilter(v === 'all' ? 'all' : Number(v));
           }}
@@ -969,45 +938,48 @@ export default function Contributions() {
                     <option key={project.id} value={project.id}>{project.name}</option>
                   ))}
                 </select>
-              </div>
+       <div className="grid grid-cols-2 gap-4">
+  <div>
+    <label className="block text-sm font-medium mb-1">From (Month)</label>
+    <select
+      className="w-full border p-2 rounded"
+      value={newContribution.fromMonth}
+      onChange={(e) =>
+        setNewContribution({
+          ...newContribution,
+          fromMonth: parseInt(e.target.value),
+        })
+      }
+    >
+      {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+        <option key={m} value={m}>
+          {new Date(0, m - 1).toLocaleString("default", { month: "long" })}
+        </option>
+      ))}
+    </select>
+  </div>
+</div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">From (Month)</label>
-                  <select
-                    className="w-full border p-2 rounded"
-                    value={newContribution.fromMonth}
-                    onChange={(e) => setNewContribution({...newContribution, fromMonth: parseInt(e.target.value)})}
-                  >
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                      <option key={m} value={m}>
-                        {new Date(0, m - 1).toLocaleString('default', { month: 'long' })}
-                      </option>
-                    ))}
-                  </select>
-                </div>
 
                 <div>
                   <label className="block text-sm font-medium mb-1">From (Year)</label>
                   <select
                     className="w-full border p-2 rounded"
                     value={newContribution.fromYear}
-                    onChange={(e) => setNewContribution({...newContribution, fromYear: parseInt(e.target.value)})}
+                    onChange={(e) => setNewContribution({ ...newContribution, fromYear: parseInt(e.target.value) })}
                   >
                     {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
                       <option key={y} value={y}>{y}</option>
                     ))}
                   </select>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">To (Month)</label>
                   <select
                     className="w-full border p-2 rounded"
                     value={newContribution.toMonth}
-                    onChange={(e) => setNewContribution({...newContribution, toMonth: parseInt(e.target.value)})}
+                    onChange={(e) => setNewContribution({ ...newContribution, toMonth: parseInt(e.target.value) })}
                   >
                     {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
                       <option key={m} value={m}>
@@ -1022,7 +994,7 @@ export default function Contributions() {
                   <select
                     className="w-full border p-2 rounded"
                     value={newContribution.toYear}
-                    onChange={(e) => setNewContribution({...newContribution, toYear: parseInt(e.target.value)})}
+                    onChange={(e) => setNewContribution({ ...newContribution, toYear: parseInt(e.target.value) })}
                   >
                     {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
                       <option key={y} value={y}>{y}</option>
@@ -1037,26 +1009,25 @@ export default function Contributions() {
                   type="number"
                   className="w-full border p-2 rounded"
                   value={newContribution.amount}
-                  onChange={(e) => setNewContribution({...newContribution, amount: parseFloat(e.target.value) || 0})}
-                  min="0"
+                  onChange={(e) => setNewContribution({ ...newContribution, amount: parseFloat(e.target.value) })}
                 />
               </div>
-            </div>
 
-            <div className="flex justify-end space-x-2 mt-6">
-              <button 
-                className="px-4 py-2 border rounded hover:bg-gray-100"
-                onClick={() => setShowAddContribution(false)}
-              >
-                Cancel
-              </button>
-              <button 
-                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
-                onClick={handleAddContribution}
-                disabled={isAddingContribution}
-              >
-                {isAddingContribution ? "Saving..." : "Save Contribution"}
-              </button>
+              <div className="flex justify-end space-x-2 mt-4">
+                <button
+                  className="px-4 py-2 rounded border hover:bg-gray-100"
+                  onClick={() => setShowAddContribution(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                  onClick={handleAddContribution}
+                  disabled={isAddingContribution}
+                >
+                  {isAddingContribution ? 'Adding...' : 'Add Contribution'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1066,54 +1037,52 @@ export default function Contributions() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <h2 className="text-xl font-bold mb-4">Add New Member</h2>
-            
+
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Name *</label>
+                <label className="block text-sm font-medium mb-1">Name</label>
                 <input
                   type="text"
                   className="w-full border p-2 rounded"
                   value={newMember.name}
-                  onChange={(e) => setNewMember({...newMember, name: e.target.value})}
-                  required
+                  onChange={(e) => setNewMember({ ...newMember, name: e.target.value })}
                 />
               </div>
-              
+
               <div>
-                <label className="block text-sm font-medium mb-1">Email</label>
+                <label className="block text-sm font-medium mb-1">Phone</label>
+                <input
+                  type="text"
+                  className="w-full border p-2 rounded"
+                  value={newMember.phone}
+                  onChange={(e) => setNewMember({ ...newMember, phone: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Email (Optional)</label>
                 <input
                   type="email"
                   className="w-full border p-2 rounded"
                   value={newMember.email}
-                  onChange={(e) => setNewMember({...newMember, email: e.target.value})}
+                  onChange={(e) => setNewMember({ ...newMember, email: e.target.value })}
                 />
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-1">Phone *</label>
-                <input
-                  type="tel"
-                  className="w-full border p-2 rounded"
-                  value={newMember.phone}
-                  onChange={(e) => setNewMember({...newMember, phone: e.target.value})}
-                  required
-                />
+
+              <div className="flex justify-end space-x-2 mt-4">
+                <button
+                  className="px-4 py-2 rounded border hover:bg-gray-100"
+                  onClick={() => setShowAddMember(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+                  onClick={handleAddMember}
+                >
+                  Add Member
+                </button>
               </div>
-            </div>
-            
-            <div className="flex justify-end space-x-2 mt-6">
-              <button 
-                className="px-4 py-2 border rounded hover:bg-gray-100"
-                onClick={() => setShowAddMember(false)}
-              >
-                Cancel
-              </button>
-              <button 
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                onClick={handleAddMember}
-              >
-                Add Member
-              </button>
             </div>
           </div>
         </div>
@@ -1121,38 +1090,27 @@ export default function Contributions() {
 
       {showBulkUpload && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl">
-            <h2 className="text-xl font-bold mb-4">Bulk Upload Contributions</h2>
-            
-            <div className="space-y-4">
-              <p className="text-sm text-gray-600">
-                Upload CSV data with columns: member_name, month, year, amount, project_id (optional)
-              </p>
-              
-              <div>
-                <label className="block text-sm font-medium mb-1">CSV Data</label>
-                <textarea
-                  className="w-full border p-2 rounded h-40 font-mono text-sm"
-                  value={csvData}
-                  onChange={(e) => setCsvData(e.target.value)}
-                  placeholder="member_name,month,year,amount,project_id&#10;John Doe,3,2024,5000,uuid-here&#10;Jane Smith,4,2024,5000,"
-                />
-              </div>
-            </div>
-            
-            <div className="flex justify-end space-x-2 mt-6">
-              <button 
-                className="px-4 py-2 border rounded hover:bg-gray-100"
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg">
+            <h2 className="text-xl font-bold mb-4">Bulk Upload Contributions (CSV)</h2>
+            <textarea
+              className="w-full border p-2 rounded h-48"
+              value={csvData}
+              onChange={(e) => setCsvData(e.target.value)}
+              placeholder="Paste CSV data here. Columns: member_name, month, year, amount, type, project_id"
+            />
+            <div className="flex justify-end space-x-2 mt-4">
+              <button
+                className="px-4 py-2 rounded border hover:bg-gray-100"
                 onClick={() => setShowBulkUpload(false)}
               >
                 Cancel
               </button>
-              <button 
-                className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50"
+              <button
+                className="px-4 py-2 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
                 onClick={handleBulkUpload}
                 disabled={processingBulk}
               >
-                {processingBulk ? "Processing..." : "Upload Contributions"}
+                {processingBulk ? 'Processing...' : 'Upload'}
               </button>
             </div>
           </div>

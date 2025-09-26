@@ -14,82 +14,111 @@ export default function Signup() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-
-    if (!fullName || fullName.trim().length < 2) {
-      setError("Full name must be at least 2 characters.")
-      setLoading(false)
-      return
-    }
-    if (!/^(\+254|0)[17]\d{8}$/.test(phone.replace(/\s/g, ''))) {
-      setError("Please enter a valid Kenyan phone number (07XXXXXXXX or +2547XXXXXXXX).")
-      setLoading(false)
-      return
-    }
-    if (!email.includes("@")) {
-      setError("Please enter a valid email address.")
-      setLoading(false)
-      return
-    }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.")
-      setLoading(false)
-      return
-    }
-
     setError(null)
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    })
+    try {
+      // Input validation
+      if (!fullName || fullName.trim().length < 2) {
+        throw new Error("Full name must be at least 2 characters.")
+      }
+      
+      if (!/^(\+254|0)[17]\d{8}$/.test(phone.replace(/\s/g, ''))) {
+        throw new Error("Please enter a valid Kenyan phone number (07XXXXXXXX or +2547XXXXXXXX).")
+      }
+      
+      if (!email.includes("@") || !email.includes(".")) {
+        throw new Error("Please enter a valid email address.")
+      }
+      
+      if (password.length < 6) {
+        throw new Error("Password must be at least 6 characters.")
+      }
 
-    if (error) {
-      setError(error.message)
-      setLoading(false)
-    } else if (data.user) {
-      const pollForProfile = async (maxAttempts = 8) => {
-        let attempt = 0
-        let wait = 300
-        while (attempt < maxAttempts) {
-          attempt++
+      // Sign up user with Supabase
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName.trim(),
+            phone: phone.replace(/\s/g, '')
+          }
+        }
+      })
+
+      if (signUpError) {
+        throw signUpError
+      }
+
+      if (!data?.user) {
+        throw new Error("No user data returned from signup. Please try again.")
+      }
+
+      const userId = data.user.id // ✅ Safe after guard
+
+      console.log('Signup successful:', data.user)
+
+      // Poll for profile creation with improved error handling
+      const pollForProfile = async (maxAttempts = 10): Promise<{ success: boolean; error?: any }> => {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           try {
-            const { data: existing, error: checkErr } = await supabase
+            const { data: profile, error: profileError } = await supabase
               .from("profiles")
-              .select("id")
-              .eq("id", data.user!.id)
-              .limit(1)
+              .select("id, updated_at")
+              .eq("id", userId) // ✅ using safe variable
+              .single()
 
-            if (checkErr) {
-              console.debug(`Signup: profiles check error on attempt ${attempt}`, checkErr)
+            if (profileError && profileError.code !== 'PGRST116') {
+              console.warn(`Profile check error on attempt ${attempt}:`, profileError)
             }
 
-            if (Array.isArray(existing) && existing.length > 0) {
-              console.debug(`Signup: found profile created by trigger on attempt ${attempt}`)
+            if (profile) {
+              console.log(`Profile found on attempt ${attempt}`)
               return { success: true }
             }
 
-            const jitter = Math.floor(Math.random() * 200)
-            const waitFor = wait + jitter
-            console.debug(`Signup: profile not found, retrying in ${waitFor}ms (attempt ${attempt})`)
-            await new Promise((res) => setTimeout(res, waitFor))
-            wait *= 2
-          } catch (e) {
-            console.debug(`Signup: unexpected error while polling for profile (attempt ${attempt})`, e)
-            await new Promise((res) => setTimeout(res, wait))
-            wait *= 2
+            // Exponential backoff with jitter
+            const baseDelay = 500
+            const jitter = Math.random() * 200
+            const delay = baseDelay * Math.pow(2, attempt - 1) + jitter
+            
+            console.log(`Profile not found, waiting ${Math.round(delay)}ms before attempt ${attempt + 1}`)
+            await new Promise(resolve => setTimeout(resolve, delay))
+            
+          } catch (error) {
+            console.warn(`Unexpected error polling for profile (attempt ${attempt}):`, error)
+            await new Promise(resolve => setTimeout(resolve, 1000))
           }
         }
-        return { success: false, error: { message: 'Timed out waiting for server-created profile. You can create a profile from the Profile page after signing in.' } }
+        
+        return { 
+          success: false, 
+          error: new Error('Profile creation timeout. You can create a profile manually after signing in.') 
+        }
       }
 
-      const result = await pollForProfile(8)
-      if (!result.success) {
-        setError('Failed to create profile: ' + (result.error?.message || 'unknown error'))
-        console.debug('Signup: poll-for-profile final result', result)
-      } else {
-        alert('✅ Account created! Please check your email for confirmation.')
-        navigate('/login')
+      const pollResult = await pollForProfile()
+      
+      if (!pollResult.success) {
+        console.warn('Profile polling failed:', pollResult.error)
       }
+
+      alert('✅ Account created successfully! Please check your email for verification.')
+      navigate('/login')
+
+    } catch (error: any) {
+      console.error('Signup failed:', error)
+      
+      if (error.message?.includes('User already registered')) {
+        setError('An account with this email already exists. Please try logging in.')
+      } else if (error.message?.includes('Invalid email')) {
+        setError('Please enter a valid email address.')
+      } else if (error.message?.includes('Password should be at least')) {
+        setError('Password must be at least 6 characters long.')
+      } else {
+        setError(error.message || 'An unexpected error occurred during signup. Please try again.')
+      }
+    } finally {
       setLoading(false)
     }
   }
@@ -127,18 +156,10 @@ export default function Signup() {
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg 
-                  xmlns="http://www.w3.org/2000/svg" 
-                  width="20" 
-                  height="20" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  strokeWidth="2" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round" 
-                  className="text-gray-400"
-                >
+                {/* user icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                  fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                   <circle cx="12" cy="7" r="4"></circle>
                 </svg>
@@ -161,18 +182,10 @@ export default function Signup() {
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg 
-                  xmlns="http://www.w3.org/2000/svg" 
-                  width="20" 
-                  height="20" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  strokeWidth="2" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round" 
-                  className="text-gray-400"
-                >
+                {/* phone icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                  fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
                 </svg>
               </div>
@@ -194,18 +207,10 @@ export default function Signup() {
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg 
-                  xmlns="http://www.w3.org/2000/svg" 
-                  width="20" 
-                  height="20" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  strokeWidth="2" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round" 
-                  className="text-gray-400"
-                >
+                {/* email icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                  fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
                   <rect width="20" height="16" x="2" y="4" rx="2"></rect>
                   <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
                 </svg>
@@ -228,18 +233,10 @@ export default function Signup() {
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg 
-                  xmlns="http://www.w3.org/2000/svg" 
-                  width="20" 
-                  height="20" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  strokeWidth="2" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round" 
-                  className="text-gray-400"
-                >
+                {/* lock icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                  fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
                   <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
                   <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                 </svg>
